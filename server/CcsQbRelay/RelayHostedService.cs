@@ -112,35 +112,38 @@ public class RelayHostedService : BackgroundService
             // Route: POST /qb/request
             if (request.HttpMethod == "POST" && request.Url?.AbsolutePath == "/qb/request")
             {
-                if (!_qbWorker.IsConnected)
-                {
-                    await WriteJsonResponse(response, 503, new { error = "QB not connected", detail = _qbWorker.LastError });
-                    return;
-                }
+                // Don't check IsConnected here — let the worker try and report failure
+                // (the connected flag may be stale; the request itself will fail cleanly if QB is down)
 
                 // Read request body
                 using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
                 var body = await reader.ReadToEndAsync();
 
-                var payload = JsonSerializer.Deserialize<QbRequestPayload>(body);
+                var payload = JsonSerializer.Deserialize<QbRequestPayload>(body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 if (string.IsNullOrWhiteSpace(payload?.Qbxml))
                 {
                     await WriteJsonResponse(response, 400, new { error = "Missing 'qbxml' field in request body" });
                     return;
                 }
 
-                _logger.LogDebug("Processing qbXML request ({Length} chars)", payload.Qbxml.Length);
+                var requestTimeout = _config.GetSection("Relay").GetValue<int>("RequestTimeout", 120);
+                _logger.LogDebug("Processing qbXML request ({Length} chars, timeout {Timeout}s)", payload.Qbxml.Length, requestTimeout);
 
                 try
                 {
                     var qbResponse = await _qbWorker.ProcessRequestAsync(payload.Qbxml)
-                        .WaitAsync(TimeSpan.FromSeconds(30));
+                        .WaitAsync(TimeSpan.FromSeconds(requestTimeout));
 
                     await WriteJsonResponse(response, 200, new { response = qbResponse, error = (string?)null });
                 }
                 catch (TimeoutException)
                 {
-                    await WriteJsonResponse(response, 504, new { error = "QB request timed out (30s)" });
+                    // A hung COM call (e.g., QB displaying a modal error dialog) requires
+                    // restarting the worker thread to recover. Otherwise all subsequent
+                    // requests will queue up behind the hung call.
+                    _logger.LogWarning("QB request timed out after {Timeout}s — restarting worker", requestTimeout);
+                    _qbWorker.Restart();
+                    await WriteJsonResponse(response, 504, new { error = $"QB request timed out ({requestTimeout}s) — worker restarted" });
                 }
                 catch (Exception ex)
                 {
@@ -151,8 +154,29 @@ public class RelayHostedService : BackgroundService
                 return;
             }
 
+            // Route: POST /qb/restart - manually restart the worker thread
+            if (request.HttpMethod == "POST" && request.Url?.AbsolutePath == "/qb/restart")
+            {
+                _qbWorker.Restart();
+                await WriteJsonResponse(response, 200, new { restarted = true });
+                return;
+            }
+
+            // Route: GET /qb/errors - read recent error log entries
+            if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/qb/errors")
+            {
+                var errors = _qbWorker.GetRecentErrors();
+                response.StatusCode = 200;
+                response.ContentType = "text/plain";
+                var buffer = Encoding.UTF8.GetBytes(errors);
+                response.ContentLength64 = buffer.Length;
+                await response.OutputStream.WriteAsync(buffer);
+                response.Close();
+                return;
+            }
+
             // 404 for anything else
-            await WriteJsonResponse(response, 404, new { error = "Not found. Use POST /qb/request or GET /qb/health" });
+            await WriteJsonResponse(response, 404, new { error = "Not found. Routes: GET /qb/health, POST /qb/request, POST /qb/restart, GET /qb/errors" });
         }
         catch (Exception ex)
         {

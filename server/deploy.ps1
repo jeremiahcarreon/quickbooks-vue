@@ -1,11 +1,15 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Deploy the CCS QB Relay service to this Windows machine.
+    Deploy the CCS QB Relay to this Windows machine.
 
 .DESCRIPTION
-    Builds, installs, and starts the CCS QB Relay Windows Service.
-    Run this script as Administrator on the machine running QuickBooks Desktop.
+    Builds and installs the CCS QB Relay as a startup application on the machine
+    running QuickBooks Desktop. The relay runs in the interactive desktop session
+    so it can access QuickBooks via the QBSDK COM object and Database Server Manager.
+
+    NOTE: This does NOT install a Windows Service. QB's QBXMLRP2 COM object requires
+    an interactive session - Windows Services run in Session 0 which cannot launch QB.
 
 .PARAMETER InstallDir
     Target installation directory. Default: C:\Services\CcsQbRelay
@@ -23,7 +27,6 @@ param(
     [int]$Port = 9123
 )
 
-$ServiceName = "CcsQbRelay"
 $ProjectDir = Join-Path $PSScriptRoot "CcsQbRelay"
 $ErrorActionPreference = "Stop"
 
@@ -31,7 +34,7 @@ Write-Host "=== CCS QB Relay Deployment ===" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Check prerequisites
-Write-Host "[1/7] Checking prerequisites..." -ForegroundColor Yellow
+Write-Host "[1/6] Checking prerequisites..." -ForegroundColor Yellow
 
 # Check .NET SDK
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
@@ -55,7 +58,7 @@ if ($qbxmlrp2) {
 
 # Step 2: Build
 Write-Host ""
-Write-Host "[2/7] Building project..." -ForegroundColor Yellow
+Write-Host "[2/6] Building project..." -ForegroundColor Yellow
 $publishDir = Join-Path $ProjectDir "bin\publish"
 
 dotnet publish $ProjectDir `
@@ -71,25 +74,32 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  Build successful: $publishDir"
 
-# Step 3: Stop existing service
+# Step 3: Stop existing relay process (if running)
 Write-Host ""
-Write-Host "[3/7] Stopping existing service (if running)..." -ForegroundColor Yellow
-$existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+Write-Host "[3/6] Stopping existing relay (if running)..." -ForegroundColor Yellow
+$existingProcess = Get-Process -Name "CcsQbRelay" -ErrorAction SilentlyContinue
+if ($existingProcess) {
+    Stop-Process -Name "CcsQbRelay" -Force
+    Start-Sleep -Seconds 2
+    Write-Host "  Relay process stopped."
+} else {
+    Write-Host "  No existing relay process found."
+}
+
+# Remove legacy Windows Service if it exists
+$existingService = Get-Service -Name "CcsQbRelay" -ErrorAction SilentlyContinue
 if ($existingService) {
     if ($existingService.Status -eq "Running") {
-        Stop-Service -Name $ServiceName -Force
+        Stop-Service -Name "CcsQbRelay" -Force
         Start-Sleep -Seconds 2
-        Write-Host "  Service stopped."
-    } else {
-        Write-Host "  Service exists but not running."
     }
-} else {
-    Write-Host "  No existing service found."
+    sc.exe delete "CcsQbRelay" | Out-Null
+    Write-Host "  Removed legacy Windows Service (no longer needed)."
 }
 
 # Step 4: Copy files
 Write-Host ""
-Write-Host "[4/7] Copying files to $InstallDir..." -ForegroundColor Yellow
+Write-Host "[4/6] Copying files to $InstallDir..." -ForegroundColor Yellow
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
@@ -100,51 +110,43 @@ Copy-Item -Path "$publishDir\*" -Destination $InstallDir -Recurse -Force
 # Copy appsettings.json if not already present (don't overwrite existing config)
 $targetSettings = Join-Path $InstallDir "appsettings.json"
 if (-not (Test-Path $targetSettings)) {
-    $sourceSettings = Join-Path $ProjectDir "appsettings.json"
+    $sourceSettings = Join-Path $PSScriptRoot "appsettings.json"
     Copy-Item -Path $sourceSettings -Destination $targetSettings
-    Write-Host "  Copied default appsettings.json — EDIT THIS before starting the service!"
+    Write-Host "  Copied default appsettings.json - EDIT THIS before starting the relay!"
     Write-Host "  Set QbFilePath, ApiKey, and AllowedIPs in: $targetSettings" -ForegroundColor Red
 } else {
-    Write-Host "  appsettings.json already exists — preserved existing config."
+    Write-Host "  appsettings.json already exists - preserved existing config."
 }
 
 Write-Host "  Files copied."
 
 # Step 5: Register URL ACL (allow non-admin to bind to port)
 Write-Host ""
-Write-Host "[5/7] Registering URL ACL for port $Port..." -ForegroundColor Yellow
+Write-Host "[5/6] Registering URL ACL for port $Port..." -ForegroundColor Yellow
 netsh http delete urlacl url="http://+:$Port/" >$null 2>&1
 netsh http add urlacl url="http://+:$Port/" user=Everyone >$null 2>&1
 Write-Host "  URL ACL registered."
 
-# Step 6: Install/update Windows Service
+# Step 6: Create startup shortcut
 Write-Host ""
-Write-Host "[6/7] Installing Windows Service..." -ForegroundColor Yellow
+Write-Host "[6/6] Creating startup shortcut..." -ForegroundColor Yellow
 $exePath = Join-Path $InstallDir "CcsQbRelay.exe"
+$startup = [Environment]::GetFolderPath("Startup")
+$ws = New-Object -ComObject WScript.Shell
+$shortcut = $ws.CreateShortcut("$startup\CcsQbRelay.lnk")
+$shortcut.TargetPath = $exePath
+$shortcut.WorkingDirectory = $InstallDir
+$shortcut.WindowStyle = 7  # minimized
+$shortcut.Description = "CCS ERP QuickBooks Desktop relay"
+$shortcut.Save()
+Write-Host "  Startup shortcut created at: $startup\CcsQbRelay.lnk"
+Write-Host "  The relay will start automatically when this user logs in."
 
-if ($existingService) {
-    # Update the binary path if it changed
-    sc.exe config $ServiceName binPath= "`"$exePath`"" | Out-Null
-    Write-Host "  Service binary path updated."
-} else {
-    sc.exe create $ServiceName binPath= "`"$exePath`"" start= auto displayname= "CCS QB Relay" | Out-Null
-    sc.exe description $ServiceName "CCS ERP QuickBooks Desktop relay service — proxies qbXML requests from the ERP to QuickBooks via QBSDK" | Out-Null
-    sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
-    Write-Host "  Service installed with auto-start and auto-restart on failure."
-}
-
-# Step 7: Start service
+# Start the relay now
 Write-Host ""
-Write-Host "[7/7] Starting service..." -ForegroundColor Yellow
-Start-Service -Name $ServiceName
+Write-Host "Starting relay..." -ForegroundColor Yellow
+Start-Process -FilePath $exePath -WorkingDirectory $InstallDir -WindowStyle Minimized
 Start-Sleep -Seconds 3
-
-$svc = Get-Service -Name $ServiceName
-if ($svc.Status -eq "Running") {
-    Write-Host "  Service is RUNNING." -ForegroundColor Green
-} else {
-    Write-Warning "  Service status: $($svc.Status). Check Event Viewer for errors."
-}
 
 # Health check
 Write-Host ""
@@ -153,20 +155,28 @@ Write-Host ""
 Write-Host "Health check:" -ForegroundColor Yellow
 try {
     $health = Invoke-RestMethod -Uri "http://localhost:$Port/qb/health" -TimeoutSec 5
-    Write-Host "  Connected: $($health.connected)"
+    Write-Host "  Connected: $($health.connected)" -ForegroundColor $(if ($health.connected) { "Green" } else { "Yellow" })
     if ($health.lastError) {
         Write-Host "  Last Error: $($health.lastError)" -ForegroundColor Yellow
     }
 } catch {
     Write-Warning "  Health check failed: $($_.Exception.Message)"
-    Write-Host "  The service may still be starting up. Try: Invoke-RestMethod http://localhost:$Port/qb/health"
+    Write-Host "  The relay may still be starting up. Try: Invoke-RestMethod http://localhost:$Port/qb/health"
 }
 
 Write-Host ""
-Write-Host "NEXT STEPS:" -ForegroundColor Yellow
-Write-Host "  1. Edit $targetSettings — set QbFilePath, ApiKey, AllowedIPs"
-Write-Host "  2. Restart the service: Restart-Service $ServiceName"
+Write-Host "FIRST-TIME SETUP:" -ForegroundColor Yellow
+Write-Host "  1. Edit $targetSettings - set QbFilePath, ApiKey, and AllowedIPs"
+Write-Host "  2. Stop and restart the relay (kill the process, it will restart on next login)"
 Write-Host "  3. Open QuickBooks Desktop and approve the 'CCS ERP Relay' application"
-Write-Host "     (Edit > Preferences > Integrated Applications > select 'Allow access even if QB is not running')"
-Write-Host "  4. Test: Invoke-RestMethod http://localhost:${Port}/qb/health"
+Write-Host "     (Edit > Preferences > Integrated Applications > Company Preferences)"
+Write-Host "     Check: 'Allow this application to log in automatically'"
+Write-Host "     Check: 'Allow access even if QuickBooks is not running'"
+Write-Host "  4. Close QuickBooks - the relay connects via DB Server Manager, QB doesn't need to be open"
+Write-Host "  5. Test: Invoke-RestMethod http://localhost:${Port}/qb/health"
+Write-Host ""
+Write-Host "AUTO-START:" -ForegroundColor Yellow
+Write-Host "  The relay starts automatically when this Windows user logs in."
+Write-Host "  For unattended restarts, enable auto-login: run 'netplwiz' and uncheck"
+Write-Host "  'Users must enter a user name and password to use this computer'."
 Write-Host ""

@@ -1,21 +1,25 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
+using System.Xml;
 
 namespace CcsQbRelay;
 
 /// <summary>
 /// Manages a dedicated STA thread for the QBSDK COM object.
 /// All QB requests are serialized through this single thread.
+/// On hung requests or fatal errors, the worker can be restarted to recover.
 /// </summary>
 public class QbWorker : IDisposable
 {
     private readonly ILogger<QbWorker> _logger;
     private readonly IConfiguration _config;
-    private readonly BlockingCollection<QbJob> _queue = new();
+    private BlockingCollection<QbJob> _queue = new();
     private Thread? _staThread;
     private volatile bool _connected;
     private volatile string? _lastError;
     private DateTime _lastRequestTime = DateTime.MinValue;
+    private readonly object _restartLock = new();
+    private readonly string _errorLogPath;
 
     public bool IsConnected => _connected;
     public string? LastError => _lastError;
@@ -25,6 +29,7 @@ public class QbWorker : IDisposable
     {
         _logger = logger;
         _config = config;
+        _errorLogPath = Path.Combine(AppContext.BaseDirectory, "qb-errors.log");
     }
 
     public void Start()
@@ -36,6 +41,32 @@ public class QbWorker : IDisposable
         };
         _staThread.SetApartmentState(ApartmentState.STA);
         _staThread.Start();
+    }
+
+    /// <summary>
+    /// Forcibly restart the worker thread. Used to recover from hung COM calls
+    /// (e.g., when QB displays a modal error dialog and ProcessRequest never returns).
+    /// </summary>
+    public void Restart()
+    {
+        lock (_restartLock)
+        {
+            _logger.LogWarning("Restarting QB worker thread...");
+            LogError("MANUAL_RESTART", "Worker restart requested");
+
+            try
+            {
+                _queue.CompleteAdding();
+                // Don't wait — the old thread may be hung. Let it die naturally.
+                _staThread = null;
+            }
+            catch { }
+
+            _queue = new BlockingCollection<QbJob>();
+            _connected = false;
+            _lastError = "Restarting...";
+            Start();
+        }
     }
 
     private void ProcessLoop()
@@ -56,6 +87,7 @@ public class QbWorker : IDisposable
             {
                 _lastError = "QBXMLRP2.RequestProcessor COM object not found. Is the QuickBooks SDK installed?";
                 _logger.LogError(_lastError);
+                LogError("STARTUP", _lastError);
                 FailAllPending(_lastError);
                 return;
             }
@@ -65,6 +97,7 @@ public class QbWorker : IDisposable
             {
                 _lastError = "Failed to create QBXMLRP2.RequestProcessor instance.";
                 _logger.LogError(_lastError);
+                LogError("STARTUP", _lastError);
                 FailAllPending(_lastError);
                 return;
             }
@@ -84,22 +117,38 @@ public class QbWorker : IDisposable
             {
                 try
                 {
+                    // Validate XML well-formedness BEFORE sending to QB
+                    // This catches the most common cause of QB crashes (malformed XML)
+                    if (!IsWellFormedXml(job.QbXml, out var xmlError))
+                    {
+                        var msg = $"Malformed XML rejected before sending to QB: {xmlError}";
+                        _logger.LogWarning(msg);
+                        LogError("XML_VALIDATION", msg, job.QbXml);
+                        job.Tcs.SetException(new InvalidOperationException(msg));
+                        continue;
+                    }
+
                     _lastRequestTime = DateTime.UtcNow;
                     string response = rp.ProcessRequest(ticket, job.QbXml);
                     job.Tcs.SetResult(response);
+                    // Successful request means the session is healthy
+                    _connected = true;
+                    _lastError = null;
+                }
+                catch (COMException comEx)
+                {
+                    _logger.LogError(comEx, "QB COM exception (HRESULT: 0x{HResult:X8})", comEx.HResult);
+                    LogError("COM_EXCEPTION", $"HRESULT 0x{comEx.HResult:X8}: {comEx.Message}", job.QbXml);
+                    _connected = false;
+                    _lastError = comEx.Message;
+                    job.Tcs.SetException(comEx);
+                    TryReconnect(ref rp, ref ticket, qbFilePath, appId, appName);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "QB ProcessRequest failed");
+                    LogError("REQUEST_FAILED", ex.Message, job.QbXml);
                     job.Tcs.SetException(ex);
-
-                    // If COM faulted, try to reconnect
-                    if (ex is COMException)
-                    {
-                        _connected = false;
-                        _lastError = ex.Message;
-                        TryReconnect(ref rp, ref ticket, qbFilePath, appId, appName);
-                    }
                 }
             }
         }
@@ -107,6 +156,7 @@ public class QbWorker : IDisposable
         {
             _lastError = ex.Message;
             _logger.LogError(ex, "QB worker thread fatal error");
+            LogError("FATAL", ex.ToString());
             _connected = false;
             FailAllPending(ex.Message);
         }
@@ -157,8 +207,41 @@ public class QbWorker : IDisposable
         {
             _lastError = $"Reconnect failed: {ex.Message}";
             _logger.LogError(ex, "QB reconnect failed");
+            LogError("RECONNECT_FAILED", ex.Message);
             _connected = false;
         }
+    }
+
+    private static bool IsWellFormedXml(string xml, out string error)
+    {
+        error = "";
+        try
+        {
+            var doc = new XmlDocument();
+            doc.LoadXml(xml);
+            return true;
+        }
+        catch (XmlException ex)
+        {
+            error = $"Line {ex.LineNumber}, Position {ex.LinePosition}: {ex.Message}";
+            return false;
+        }
+    }
+
+    private void LogError(string category, string message, string? requestXml = null)
+    {
+        try
+        {
+            var entry = $"[{DateTime.UtcNow:o}] [{category}] {message}\n";
+            if (!string.IsNullOrEmpty(requestXml))
+            {
+                var preview = requestXml.Length > 500 ? requestXml.Substring(0, 500) + "..." : requestXml;
+                entry += $"  Request: {preview}\n";
+            }
+            entry += "\n";
+            File.AppendAllText(_errorLogPath, entry);
+        }
+        catch { /* logging must never throw */ }
     }
 
     private void FailAllPending(string error)
@@ -177,6 +260,30 @@ public class QbWorker : IDisposable
         var job = new QbJob { QbXml = qbXml, Tcs = new TaskCompletionSource<string>() };
         _queue.Add(job);
         return job.Tcs.Task;
+    }
+
+    /// <summary>
+    /// Read the most recent error log entries (for the /qb/errors endpoint).
+    /// </summary>
+    public string GetRecentErrors(int maxBytes = 20000)
+    {
+        try
+        {
+            if (!File.Exists(_errorLogPath)) return "";
+            var fileInfo = new FileInfo(_errorLogPath);
+            if (fileInfo.Length <= maxBytes)
+            {
+                return File.ReadAllText(_errorLogPath);
+            }
+            using var fs = File.OpenRead(_errorLogPath);
+            fs.Seek(-maxBytes, SeekOrigin.End);
+            using var reader = new StreamReader(fs);
+            return "...(truncated)...\n" + reader.ReadToEnd();
+        }
+        catch (Exception ex)
+        {
+            return $"Error reading log: {ex.Message}";
+        }
     }
 
     public void Dispose()
