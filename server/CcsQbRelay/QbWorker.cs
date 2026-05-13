@@ -106,8 +106,14 @@ public class QbWorker : IDisposable
             rp.OpenConnection2(appId, appName, 1 /* localQBD */);
             _logger.LogInformation("QB connection opened: {AppName}", appName);
 
-            // Begin session (multi-user mode = 2)
-            ticket = rp.BeginSession(qbFilePath, 2 /* qbFileOpenMultiUser */);
+            // Begin session with qbFileOpenDoNotCare (0). Lets the relay
+            // attach to whatever session is currently open on the host —
+            // single-user UI, multi-user file, or no UI at all. Forcing
+            // qbFileOpenMultiUser (2) or qbFileOpenSingleUser (1) created
+            // a lock collision when a human had QB Desktop open: the relay
+            // and the UI couldn't coexist and operators had to close one
+            // to use the other.
+            ticket = rp.BeginSession(qbFilePath, 0 /* qbFileOpenDoNotCare */);
             _connected = true;
             _lastError = null;
             _logger.LogInformation("QB session started: {FilePath}", qbFilePath);
@@ -198,7 +204,7 @@ public class QbWorker : IDisposable
             var rpType = Type.GetTypeFromProgID("QBXMLRP2.RequestProcessor");
             rp = Activator.CreateInstance(rpType!);
             rp!.OpenConnection2(appId, appName, 1);
-            ticket = rp.BeginSession(qbFilePath, 2);
+            ticket = rp.BeginSession(qbFilePath, 0 /* qbFileOpenDoNotCare */);
             _connected = true;
             _lastError = null;
             _logger.LogInformation("QB reconnected successfully");
