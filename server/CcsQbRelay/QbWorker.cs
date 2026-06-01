@@ -76,6 +76,20 @@ public class QbWorker : IDisposable
         var appName = relayConfig["AppName"] ?? "CCS ERP Relay";
         var appId = relayConfig["AppID"] ?? "CCSRelay";
 
+        // Multi-user coexistence: when QuickBooks already has the company file
+        // open (e.g. a human in Multi-User Mode), the relay must ATTACH to that
+        // open file by passing an EMPTY path. Passing an explicit QbFilePath
+        // makes QB try to open THAT file in its own default (single-user) mode,
+        // which either single-locks the file (if QB was closed) or collides
+        // with the already-open multi-user file ("opened in a mode other than
+        // the one specified"). Empty path = use whatever file QB has open, in
+        // its current mode. Set AttachToOpenFile=false only for unattended runs
+        // where the relay should auto-open a closed file (always single-user).
+        // Default true; only an explicit "false" opts into auto-opening a
+        // closed file. Plain indexer avoids the Configuration.Binder extension.
+        var attachToOpenFile = (relayConfig["AttachToOpenFile"] ?? "true").Trim().ToLowerInvariant() != "false";
+        var sessionPath = attachToOpenFile ? "" : qbFilePath;
+
         dynamic? rp = null;
         string? ticket = null;
 
@@ -106,17 +120,12 @@ public class QbWorker : IDisposable
             rp.OpenConnection2(appId, appName, 1 /* localQBD */);
             _logger.LogInformation("QB connection opened: {AppName}", appName);
 
-            // Begin session with qbFileOpenDoNotCare (0). Lets the relay
-            // attach to whatever session is currently open on the host —
-            // single-user UI, multi-user file, or no UI at all. Forcing
-            // qbFileOpenMultiUser (2) or qbFileOpenSingleUser (1) created
-            // a lock collision when a human had QB Desktop open: the relay
-            // and the UI couldn't coexist and operators had to close one
-            // to use the other.
-            ticket = rp.BeginSession(qbFilePath, 0 /* qbFileOpenDoNotCare */);
+            // qbFileOpenDoNotCare (0) + empty sessionPath: attach to the file
+            // QuickBooks already has open, in its current mode (see above).
+            ticket = rp.BeginSession(sessionPath, 0 /* qbFileOpenDoNotCare */);
             _connected = true;
             _lastError = null;
-            _logger.LogInformation("QB session started: {FilePath}", qbFilePath);
+            _logger.LogInformation("QB session started (attachToOpenFile={Attach})", attachToOpenFile);
 
             // Process jobs from the queue
             foreach (var job in _queue.GetConsumingEnumerable())
@@ -148,7 +157,7 @@ public class QbWorker : IDisposable
                     _connected = false;
                     _lastError = comEx.Message;
                     job.Tcs.SetException(comEx);
-                    TryReconnect(ref rp, ref ticket, qbFilePath, appId, appName);
+                    TryReconnect(ref rp, ref ticket, sessionPath, appId, appName);
                 }
                 catch (Exception ex)
                 {
@@ -182,7 +191,7 @@ public class QbWorker : IDisposable
         }
     }
 
-    private void TryReconnect(ref dynamic? rp, ref string? ticket, string qbFilePath, string appId, string appName)
+    private void TryReconnect(ref dynamic? rp, ref string? ticket, string sessionPath, string appId, string appName)
     {
         _logger.LogWarning("Attempting QB reconnect...");
 
@@ -204,7 +213,7 @@ public class QbWorker : IDisposable
             var rpType = Type.GetTypeFromProgID("QBXMLRP2.RequestProcessor");
             rp = Activator.CreateInstance(rpType!);
             rp!.OpenConnection2(appId, appName, 1);
-            ticket = rp.BeginSession(qbFilePath, 0 /* qbFileOpenDoNotCare */);
+            ticket = rp.BeginSession(sessionPath, 0 /* qbFileOpenDoNotCare */);
             _connected = true;
             _lastError = null;
             _logger.LogInformation("QB reconnected successfully");
