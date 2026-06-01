@@ -90,6 +90,13 @@ public class QbWorker : IDisposable
         var attachToOpenFile = (relayConfig["AttachToOpenFile"] ?? "true").Trim().ToLowerInvariant() != "false";
         var sessionPath = attachToOpenFile ? "" : qbFilePath;
 
+        // BeginSession open mode: 0=DoNotCare, 1=SingleUser, 2=MultiUser.
+        // DoNotCare normally attaches to the open file in its current mode, but
+        // some QB builds resolve it to single-user and reject a multi-user
+        // file. If running alongside multi-user QuickBooks fails with a mode
+        // mismatch, set OpenMode=2 to explicitly join the multi-user session.
+        var openMode = int.TryParse(relayConfig["OpenMode"], out var m) ? m : 0;
+
         dynamic? rp = null;
         string? ticket = null;
 
@@ -122,10 +129,10 @@ public class QbWorker : IDisposable
 
             // qbFileOpenDoNotCare (0) + empty sessionPath: attach to the file
             // QuickBooks already has open, in its current mode (see above).
-            ticket = rp.BeginSession(sessionPath, 0 /* qbFileOpenDoNotCare */);
+            ticket = rp.BeginSession(sessionPath, openMode);
             _connected = true;
             _lastError = null;
-            _logger.LogInformation("QB session started (attachToOpenFile={Attach})", attachToOpenFile);
+            _logger.LogInformation("QB session started (attachToOpenFile={Attach}, openMode={Mode})", attachToOpenFile, openMode);
 
             // Process jobs from the queue
             foreach (var job in _queue.GetConsumingEnumerable())
@@ -157,7 +164,7 @@ public class QbWorker : IDisposable
                     _connected = false;
                     _lastError = comEx.Message;
                     job.Tcs.SetException(comEx);
-                    TryReconnect(ref rp, ref ticket, sessionPath, appId, appName);
+                    TryReconnect(ref rp, ref ticket, sessionPath, openMode, appId, appName);
                 }
                 catch (Exception ex)
                 {
@@ -191,7 +198,7 @@ public class QbWorker : IDisposable
         }
     }
 
-    private void TryReconnect(ref dynamic? rp, ref string? ticket, string sessionPath, string appId, string appName)
+    private void TryReconnect(ref dynamic? rp, ref string? ticket, string sessionPath, int openMode, string appId, string appName)
     {
         _logger.LogWarning("Attempting QB reconnect...");
 
@@ -213,7 +220,7 @@ public class QbWorker : IDisposable
             var rpType = Type.GetTypeFromProgID("QBXMLRP2.RequestProcessor");
             rp = Activator.CreateInstance(rpType!);
             rp!.OpenConnection2(appId, appName, 1);
-            ticket = rp.BeginSession(sessionPath, 0 /* qbFileOpenDoNotCare */);
+            ticket = rp.BeginSession(sessionPath, openMode);
             _connected = true;
             _lastError = null;
             _logger.LogInformation("QB reconnected successfully");
