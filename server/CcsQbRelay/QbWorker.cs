@@ -159,6 +159,23 @@ public class QbWorker : IDisposable
                 }
                 catch (COMException comEx)
                 {
+                    // Request-level errors (QB rejected THIS request's qbXML —
+                    // spec violations, unknown elements, version mismatches) do
+                    // NOT poison the session. Tearing the connection down and
+                    // re-running BeginSession took ~30s per malformed request
+                    // and stalled every queued job behind it. Only genuine
+                    // connection/session faults trigger a reconnect.
+                    if (IsRequestLevelError(comEx))
+                    {
+                        _logger.LogWarning("QB rejected request (session kept): {Message}", comEx.Message);
+                        LogError("QB_PARSE_REJECT", $"HRESULT 0x{comEx.HResult:X8}: {comEx.Message}", job.QbXml);
+                        job.Tcs.SetException(comEx);
+                        // Session is healthy — the next queued job proceeds immediately.
+                        _connected = true;
+                        _lastError = null;
+                        continue;
+                    }
+
                     _logger.LogError(comEx, "QB COM exception (HRESULT: 0x{HResult:X8})", comEx.HResult);
                     LogError("COM_EXCEPTION", $"HRESULT 0x{comEx.HResult:X8}: {comEx.Message}", job.QbXml);
                     _connected = false;
@@ -232,6 +249,26 @@ public class QbWorker : IDisposable
             LogError("RECONNECT_FAILED", ex.Message);
             _connected = false;
         }
+    }
+
+    /// <summary>
+    /// QBXMLRP2 raises COMExceptions both for request-level problems (the qbXML
+    /// itself is unparseable / uses an element QB doesn't know) and for genuine
+    /// session faults (ticket invalid, connection dropped). Request-level ones
+    /// are deterministic client bugs — the session stays valid and must be kept.
+    /// 0x80040400 is QB_E_QBXML (the "error when parsing the provided XML text
+    /// stream" class); message needles cover localized/variant phrasings.
+    /// </summary>
+    private static bool IsRequestLevelError(COMException ex)
+    {
+        if ((uint)ex.HResult == 0x80040400) return true;
+
+        var m = (ex.Message ?? "").ToLowerInvariant();
+        return m.Contains("parsing the provided xml")
+            || m.Contains("not well-formed")
+            || m.Contains("could not be parsed")
+            || m.Contains("xml text stream")
+            || m.Contains("unsupported version");
     }
 
     private static bool IsWellFormedXml(string xml, out string error)
