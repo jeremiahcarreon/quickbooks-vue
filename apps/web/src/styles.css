@@ -1,0 +1,184 @@
+:root {
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+  color-scheme: light dark;
+}
+html,
+body {
+  margin: 0;
+  background: var(--p-surface-50);
+  color: var(--p-text-color);
+}
+.app-dark body,
+html.app-dark {
+  background: var(--p-surface-950);
+}
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ---- generated forms (shared by ObjectForm / FormLayout / LineItemsEditor) */
+.gf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 0.85rem 1.25rem;
+  align-items: start;
+}
+.gf-grid--nested {
+  padding: 0.75rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: var(--p-content-border-radius);
+}
+.gf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.gf-field--wide,
+.gf-choice {
+  grid-column: 1 / -1;
+}
+.gf-field--section > .gf-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.gf-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--p-text-muted-color);
+}
+.gf-req {
+  color: var(--p-red-500);
+  margin-left: 0.15rem;
+}
+.gf-hint {
+  margin-left: 0.4rem;
+  font-weight: 400;
+  opacity: 0.7;
+}
+.gf-error {
+  color: var(--p-red-500);
+  font-size: 0.8rem;
+}
+.gf-choice {
+  border: 1px dashed var(--p-content-border-color);
+  border-radius: var(--p-content-border-radius);
+  padding: 0.6rem 0.75rem 0.75rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.gf-missing {
+  color: var(--p-text-muted-color);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---- page chrome */
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.page-head h1 {
+  font-size: 1.35rem;
+  margin: 0;
+}
+.page-head__spacer {
+  flex: 1;
+}
+.page-sub {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+}
+
+/* ---- qbXML highlighting */
+.xml-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+pre.xml-view {
+  margin: 0;
+  padding: 0.75rem;
+  overflow: auto;
+  max-height: 60vh;
+  background: var(--p-content-hover-background);
+  border-radius: var(--p-content-border-radius);
+}
+.xml-tag {
+  color: var(--p-blue-600);
+}
+.xml-attr {
+  color: var(--p-orange-600);
+}
+.xml-value {
+  color: var(--p-green-700);
+}
+.xml-comment {
+  color: var(--p-surface-500);
+  font-style: italic;
+}
+.xml-pi,
+.xml-cdata {
+  color: var(--p-purple-600);
+}
+.xml-punct {
+  color: var(--p-surface-500);
+}
+.xml-entity {
+  color: var(--p-red-600);
+}
+.app-dark .xml-tag {
+  color: var(--p-blue-300);
+}
+.app-dark .xml-attr {
+  color: var(--p-orange-300);
+}
+.app-dark .xml-value {
+  color: var(--p-green-300);
+}
+
+/* ---- admin dialogs */
+.admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.admin-form > label {
+  font-size: 0.8rem;
+  color: var(--p-text-muted-color);
+  margin-top: 0.3rem;
+}
+.admin-form :deep(.p-password),
+.admin-form .p-password,
+.admin-form .p-password input {
+  width: 100%;
+}
+.admin-form__inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.admin-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
