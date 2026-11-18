@@ -8,10 +8,17 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Version>1.1.0</Version>
+    <!-- Allows building (not running) the Windows relay from Linux/macOS, e.g. in CI. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\QuickBooksVueRelay.Core\QuickBooksVueRelay.Core.csproj" />
   </ItemGroup>
 
   <!-- QBXMLRP2 COM Reference — generated at build time on Windows with QB SDK installed -->
@@ -22,6 +29,12 @@
       <VersionMinor>0</VersionMinor>
       <WrapperTool>tlbimp</WrapperTool>
     </COMReference>
+  </ItemGroup>
+
+  <!-- The qbXML XSDs are not distributed. If they have been copied into a
+       "schemas" folder next to this project, ship them beside the executable. -->
+  <ItemGroup>
+    <None Include="schemas\*.xsd" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Condition="Exists('schemas')" />
   </ItemGroup>
 
 </Project>

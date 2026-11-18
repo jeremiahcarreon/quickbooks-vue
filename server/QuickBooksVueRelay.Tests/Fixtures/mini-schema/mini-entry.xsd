@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Minimal stand-in schema for unit tests. Written for this project; it only
+     mimics the outer shape of a qbXML request document. -->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xsd:include schemaLocation="mini-types.xsd"/>
+
+  <xsd:element name="QBXML">
+    <xsd:complexType>
+      <xsd:sequence>
+        <xsd:element name="QBXMLMsgsRq">
+          <xsd:complexType>
+            <xsd:choice minOccurs="0" maxOccurs="unbounded">
+              <xsd:element name="HostQueryRq">
+                <xsd:complexType>
+                  <xsd:attribute name="requestID" type="STRTYPE"/>
+                </xsd:complexType>
+              </xsd:element>
+              <xsd:element name="CustomerQueryRq">
+                <xsd:complexType>
+                  <xsd:sequence>
+                    <xsd:element name="MaxReturned" type="INTTYPE" minOccurs="0"/>
+                    <xsd:element name="NameFilter" type="NAMETYPE" minOccurs="0"/>
+                  </xsd:sequence>
+                  <xsd:attribute name="requestID" type="STRTYPE"/>
+                </xsd:complexType>
+              </xsd:element>
+            </xsd:choice>
+            <xsd:attribute name="onError" use="required">
+              <xsd:simpleType>
+                <xsd:restriction base="xsd:string">
+                  <xsd:enumeration value="stopOnError"/>
+                  <xsd:enumeration value="continueOnError"/>
+                </xsd:restriction>
+              </xsd:simpleType>
+            </xsd:attribute>
+          </xsd:complexType>
+        </xsd:element>
+      </xsd:sequence>
+    </xsd:complexType>
+  </xsd:element>
+</xsd:schema>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Deliberately includes a file outside the schema directory. -->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xsd:include schemaLocation="../outside.xsd"/>
+  <xsd:element name="QBXML" type="xsd:string"/>
+</xsd:schema>
