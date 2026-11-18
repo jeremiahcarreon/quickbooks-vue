@@ -1,0 +1,31 @@
+{
+  "name": "@qbv/relay-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed HTTP client for the QuickBooks Vue relay (POST /qb/request, GET /qb/health)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@qbv/qbxml": "*"
+  }
+}

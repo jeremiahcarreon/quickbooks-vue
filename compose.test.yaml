@@ -1,0 +1,46 @@
+# Throwaway Postgres + Redis for automated tests.
+#   npm run infra:up    (docker compose -p qbv-test -f compose.test.yaml up -d --wait)
+#   npm run infra:down  (removes containers and volumes)
+# Data lives in tmpfs: every `up` after a `down` starts empty.
+# Host ports bind to 127.0.0.1 only. Override with QBV_TEST_PG_PORT / QBV_TEST_REDIS_PORT.
+name: qbv-test
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: qbv
+      POSTGRES_PASSWORD: qbv
+      POSTGRES_DB: qbv
+    command:
+      [
+        'postgres',
+        '-c',
+        'fsync=off',
+        '-c',
+        'synchronous_commit=off',
+        '-c',
+        'full_page_writes=off',
+        '-c',
+        'max_connections=300',
+      ]
+    ports:
+      - '127.0.0.1:${QBV_TEST_PG_PORT:-55433}:5432'
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U qbv -d qbv']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    ports:
+      - '127.0.0.1:${QBV_TEST_REDIS_PORT:-56379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 30
