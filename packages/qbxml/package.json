@@ -1,0 +1,44 @@
+{
+  "name": "@qbv/qbxml",
+  "version": "0.1.0",
+  "private": true,
+  "description": "qbXML schema loading, XSD validation, catalog codegen, request building and response parsing",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./catalog.json": "./generated/catalog.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "generated",
+    "scripts"
+  ],
+  "scripts": {
+    "codegen": "node scripts/codegen.mjs",
+    "postinstall": "node scripts/codegen.mjs --if-schemas",
+    "prebuild": "node scripts/codegen.mjs --if-stale",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "node scripts/codegen.mjs --if-stale",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.2.5",
+    "libxml2-wasm": "0.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}
