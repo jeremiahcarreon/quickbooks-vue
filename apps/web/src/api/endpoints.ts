@@ -472,3 +472,62 @@ export async function fetchHealth(): Promise<HealthStatus> {
     throw err;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Cross-type search (spotlight)
+
+export interface SearchParams {
+  q?: string;
+  /** Limit hits to these types; every group still reports its total. */
+  types?: string[];
+  /** Transaction date range, YYYY-MM-DD. */
+  from?: string;
+  to?: string;
+  /** Customer/vendor/employee ListID (a customer includes its jobs). */
+  entity?: string;
+  amountMin?: string;
+  amountMax?: string;
+  includeInactive?: boolean;
+  perType?: number;
+}
+
+export interface SearchHit {
+  type: string;
+  qbId: string;
+  name: string | null;
+  refNumber: string | null;
+  txnDate: string | null;
+  amount: string | null;
+  isActive: boolean | null;
+  entityRefId: string | null;
+  entityName: string | null;
+  companyName: string | null;
+  email: string | null;
+  phone: string | null;
+  memo: string | null;
+}
+
+export interface SearchGroup {
+  type: string;
+  category: 'list' | 'txn' | 'other';
+  total: number;
+  items: SearchHit[];
+}
+
+export const searchApi = {
+  async search(params: SearchParams, signal?: AbortSignal): Promise<SearchGroup[]> {
+    const query: QueryParams = {
+      q: params.q || undefined,
+      types: params.types?.length ? params.types.join(',') : undefined,
+      from: params.from || undefined,
+      to: params.to || undefined,
+      entity: params.entity || undefined,
+      amountMin: params.amountMin || undefined,
+      amountMax: params.amountMax || undefined,
+      includeInactive: params.includeInactive ? 'true' : undefined,
+      perType: params.perType,
+    };
+    const res = await api.get<{ groups?: SearchGroup[] }>('/search', { query, signal });
+    return Array.isArray(res?.groups) ? res.groups : [];
+  },
+};

@@ -28,6 +28,7 @@ import { metaRoutes } from './routes/meta.js';
 import { objectRoutes } from './routes/objects.js';
 import { qbxmlRoutes } from './routes/qbxml.js';
 import { loadReportsModule, reportRoutes } from './routes/reports.js';
+import { searchRoutes } from './routes/search.js';
 import type { AppDeps, AppOptions } from './types.js';
 
 export const API_PREFIX = '/api';
@@ -271,6 +272,7 @@ export async function buildApp(deps: AppDeps, options: AppOptions = {}): Promise
       await authRoutes(api, ctx);
       await metaRoutes(api, ctx);
       await objectRoutes(api, ctx);
+      await searchRoutes(api, ctx);
       await actionRoutes(api, ctx);
       await commandRoutes(api, ctx);
       await qbxmlRoutes(api, ctx);

@@ -5,6 +5,7 @@ export * from './migrator.js';
 export { migrations } from './migrations/index.js';
 export * from './to-row.js';
 export * from './objects.js';
+export * from './search.js';
 export * from './commands.js';
 export * from './sync-state.js';
 export * from './audit.js';

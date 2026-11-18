@@ -10,7 +10,7 @@ import { useToast } from 'primevue/usetoast';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RouterLink, RouterView, useRoute } from 'vue-router';
 import CommandTray from '@/components/shell/CommandTray.vue';
-import GlobalSearch from '@/components/shell/GlobalSearch.vue';
+import SpotlightSearch from '@/components/shell/SpotlightSearch.vue';
 import RelayStatus from '@/components/shell/RelayStatus.vue';
 import UserMenu from '@/components/shell/UserMenu.vue';
 import { trayBus } from '@/components/trayBus';
@@ -86,7 +86,7 @@ onBeforeUnmount(() => {
         <i class="pi pi-book" aria-hidden="true" />
         <span>QuickBooks Vue</span>
       </RouterLink>
-      <div class="shell__search"><GlobalSearch /></div>
+      <div class="shell__search"><SpotlightSearch /></div>
       <div class="shell__spacer" />
       <RelayStatus />
       <CommandTray />
