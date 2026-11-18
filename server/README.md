@@ -1,15 +1,15 @@
-# CCS QB Relay
+# QuickBooks Vue Relay
 
-A thin Windows Service that proxies qbXML requests from the CCS ERP to QuickBooks Enterprise Desktop via the QBSDK COM object.
+A thin Windows service that forwards qbXML requests from any application to QuickBooks Desktop via the QBSDK COM object.
 
 ## Architecture
 
 ```
-CCS ERP (Laravel)  ──HTTP/JSON──►  This Service  ──COM──►  QuickBooks Desktop
-                   ◄──────────────  (Windows)    ◄───────  Enterprise
+Your app (any language)  ──HTTP/JSON──►  This service  ──COM──►  QuickBooks Desktop
+                         ◄──────────────  (Windows)    ◄───────
 ```
 
-The relay is a simple pipe. All business logic (building qbXML, parsing responses, entity mapping) lives in the Laravel app. This service just:
+The relay is a simple pipe. All business logic (building qbXML, parsing responses, entity mapping) lives in the calling app. This service just:
 
 1. Accepts HTTP requests with qbXML payloads
 2. Passes them to QuickBooks via the QBSDK COM object
@@ -24,18 +24,18 @@ The relay is a simple pipe. All business logic (building qbXML, parsing response
 
 ## Quick Deploy
 
-1. Copy this `relay/` folder to the Windows machine running QuickBooks
-2. Edit `CcsQbRelay/appsettings.json`:
+1. Copy this `server/` folder to the Windows machine running QuickBooks
+2. Edit `QuickBooksVueRelay/appsettings.json`:
    - `QbFilePath`: Full path to your `.QBW` company file
-   - `ApiKey`: A strong secret key (shared with the Laravel app)
-   - `AllowedIPs`: IP addresses allowed to connect (your ERP server)
+   - `ApiKey`: A strong secret key (the calling app sends it in the `X-Api-Key` header)
+   - `AllowedIPs`: IP addresses allowed to connect (the machines that call the relay)
 3. Run PowerShell as Administrator:
    ```powershell
-   cd relay
+   cd server
    .\deploy.ps1
    ```
 4. Open QuickBooks Desktop
-5. When prompted, approve "CCS ERP Relay" with **"Allow access even if QuickBooks is not running"**
+5. When prompted, approve "QuickBooks Vue Relay" with **"Allow access even if QuickBooks is not running"**
 6. Test the health endpoint:
    ```powershell
    Invoke-RestMethod http://localhost:9123/qb/health
@@ -88,7 +88,7 @@ Send a qbXML request to QuickBooks.
 
 ## Configuration
 
-Edit `appsettings.json` in the install directory (default: `C:\Services\CcsQbRelay\appsettings.json`):
+Edit `appsettings.json` in the install directory (default: `C:\Services\QuickBooksVueRelay\appsettings.json`):
 
 ```json
 {
@@ -97,34 +97,34 @@ Edit `appsettings.json` in the install directory (default: `C:\Services\CcsQbRel
     "ApiKey": "your-strong-secret-key",
     "AllowedIPs": ["10.0.0.5", "192.168.1.100"],
     "QbFilePath": "C:\\QuickBooks\\MyCompany.QBW",
-    "AppName": "CCS ERP Relay",
-    "AppID": "CCSRelay"
+    "AppName": "QuickBooks Vue Relay",
+    "AppID": "QuickBooksVue"
   }
 }
 ```
 
 After editing, restart the service:
 ```powershell
-Restart-Service CcsQbRelay
+Restart-Service QuickBooksVueRelay
 ```
 
 ## Service Management
 
 ```powershell
 # Check status
-Get-Service CcsQbRelay
+Get-Service QuickBooksVueRelay
 
 # Start/stop/restart
-Start-Service CcsQbRelay
-Stop-Service CcsQbRelay
-Restart-Service CcsQbRelay
+Start-Service QuickBooksVueRelay
+Stop-Service QuickBooksVueRelay
+Restart-Service QuickBooksVueRelay
 
-# View logs (Event Viewer → Windows Logs → Application, source: CcsQbRelay)
-Get-EventLog -LogName Application -Source "CcsQbRelay" -Newest 20
+# View logs (Event Viewer → Windows Logs → Application, source: QuickBooksVueRelay)
+Get-EventLog -LogName Application -Source "QuickBooksVueRelay" -Newest 20
 
 # Uninstall
-Stop-Service CcsQbRelay
-sc.exe delete CcsQbRelay
+Stop-Service QuickBooksVueRelay
+sc.exe delete QuickBooksVueRelay
 ```
 
 ## Troubleshooting
@@ -141,8 +141,8 @@ sc.exe delete CcsQbRelay
 **Service won't start:**
 - Check Event Viewer for error details
 - Ensure port 9123 is not in use: `netstat -an | findstr 9123`
-- Try running the exe directly to see console output: `C:\Services\CcsQbRelay\CcsQbRelay.exe`
+- Try running the exe directly to see console output: `C:\Services\QuickBooksVueRelay\QuickBooksVueRelay.exe`
 
-**"Access denied" from Laravel:**
-- Verify the API key matches between Laravel's `.env` and the relay's `appsettings.json`
-- Verify the ERP server's IP is in the `AllowedIPs` list
+**"Access denied" from the calling app:**
+- Verify the API key matches between the calling app and the relay's `appsettings.json`
+- Verify the calling machine's IP is in the `AllowedIPs` list

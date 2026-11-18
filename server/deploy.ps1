@@ -1,10 +1,10 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Deploy the CCS QB Relay to this Windows machine.
+    Deploy the QuickBooks Vue Relay to this Windows machine.
 
 .DESCRIPTION
-    Builds and installs the CCS QB Relay as a startup application on the machine
+    Builds and installs the QuickBooks Vue Relay as a startup application on the machine
     running QuickBooks Desktop. The relay runs in the interactive desktop session
     so it can access QuickBooks via the QBSDK COM object and Database Server Manager.
 
@@ -12,25 +12,25 @@
     an interactive session - Windows Services run in Session 0 which cannot launch QB.
 
 .PARAMETER InstallDir
-    Target installation directory. Default: C:\Services\CcsQbRelay
+    Target installation directory. Default: C:\Services\QuickBooksVueRelay
 
 .PARAMETER Port
     HTTP port for the relay. Default: 9123
 
 .EXAMPLE
     .\deploy.ps1
-    .\deploy.ps1 -InstallDir "D:\CcsQbRelay" -Port 9200
+    .\deploy.ps1 -InstallDir "D:\QuickBooksVueRelay" -Port 9200
 #>
 
 param(
-    [string]$InstallDir = "C:\Services\CcsQbRelay",
+    [string]$InstallDir = "C:\Services\QuickBooksVueRelay",
     [int]$Port = 9123
 )
 
-$ProjectDir = Join-Path $PSScriptRoot "CcsQbRelay"
+$ProjectDir = Join-Path $PSScriptRoot "QuickBooksVueRelay"
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== CCS QB Relay Deployment ===" -ForegroundColor Cyan
+Write-Host "=== QuickBooks Vue Relay Deployment ===" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Check prerequisites
@@ -77,9 +77,9 @@ Write-Host "  Build successful: $publishDir"
 # Step 3: Stop existing relay process (if running)
 Write-Host ""
 Write-Host "[3/6] Stopping existing relay (if running)..." -ForegroundColor Yellow
-$existingProcess = Get-Process -Name "CcsQbRelay" -ErrorAction SilentlyContinue
+$existingProcess = Get-Process -Name "QuickBooksVueRelay" -ErrorAction SilentlyContinue
 if ($existingProcess) {
-    Stop-Process -Name "CcsQbRelay" -Force
+    Stop-Process -Name "QuickBooksVueRelay" -Force
     Start-Sleep -Seconds 2
     Write-Host "  Relay process stopped."
 } else {
@@ -87,13 +87,13 @@ if ($existingProcess) {
 }
 
 # Remove legacy Windows Service if it exists
-$existingService = Get-Service -Name "CcsQbRelay" -ErrorAction SilentlyContinue
+$existingService = Get-Service -Name "QuickBooksVueRelay" -ErrorAction SilentlyContinue
 if ($existingService) {
     if ($existingService.Status -eq "Running") {
-        Stop-Service -Name "CcsQbRelay" -Force
+        Stop-Service -Name "QuickBooksVueRelay" -Force
         Start-Sleep -Seconds 2
     }
-    sc.exe delete "CcsQbRelay" | Out-Null
+    sc.exe delete "QuickBooksVueRelay" | Out-Null
     Write-Host "  Removed legacy Windows Service (no longer needed)."
 }
 
@@ -130,16 +130,16 @@ Write-Host "  URL ACL registered."
 # Step 6: Create startup shortcut
 Write-Host ""
 Write-Host "[6/6] Creating startup shortcut..." -ForegroundColor Yellow
-$exePath = Join-Path $InstallDir "CcsQbRelay.exe"
+$exePath = Join-Path $InstallDir "QuickBooksVueRelay.exe"
 $startup = [Environment]::GetFolderPath("Startup")
 $ws = New-Object -ComObject WScript.Shell
-$shortcut = $ws.CreateShortcut("$startup\CcsQbRelay.lnk")
+$shortcut = $ws.CreateShortcut("$startup\QuickBooksVueRelay.lnk")
 $shortcut.TargetPath = $exePath
 $shortcut.WorkingDirectory = $InstallDir
 $shortcut.WindowStyle = 7  # minimized
-$shortcut.Description = "CCS ERP QuickBooks Desktop relay"
+$shortcut.Description = "QuickBooks Vue relay for QuickBooks Desktop"
 $shortcut.Save()
-Write-Host "  Startup shortcut created at: $startup\CcsQbRelay.lnk"
+Write-Host "  Startup shortcut created at: $startup\QuickBooksVueRelay.lnk"
 Write-Host "  The relay will start automatically when this user logs in."
 
 # Start the relay now
@@ -168,7 +168,7 @@ Write-Host ""
 Write-Host "FIRST-TIME SETUP:" -ForegroundColor Yellow
 Write-Host "  1. Edit $targetSettings - set QbFilePath, ApiKey, and AllowedIPs"
 Write-Host "  2. Stop and restart the relay (kill the process, it will restart on next login)"
-Write-Host "  3. Open QuickBooks Desktop and approve the 'CCS ERP Relay' application"
+Write-Host "  3. Open QuickBooks Desktop and approve the 'QuickBooks Vue Relay' application"
 Write-Host "     (Edit > Preferences > Integrated Applications > Company Preferences)"
 Write-Host "     Check: 'Allow this application to log in automatically'"
 Write-Host "     Check: 'Allow access even if QuickBooks is not running'"

@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Xml;
 
-namespace CcsQbRelay;
+namespace QuickBooksVueRelay;
 
 /// <summary>
 /// Manages a dedicated STA thread for the QBSDK COM object.
@@ -73,8 +73,8 @@ public class QbWorker : IDisposable
     {
         var relayConfig = _config.GetSection("Relay");
         var qbFilePath = relayConfig["QbFilePath"] ?? "";
-        var appName = relayConfig["AppName"] ?? "CCS ERP Relay";
-        var appId = relayConfig["AppID"] ?? "CCSRelay";
+        var appName = relayConfig["AppName"] ?? "QuickBooks Vue Relay";
+        var appId = relayConfig["AppID"] ?? "QuickBooksVue";
 
         // Multi-user coexistence: when QuickBooks already has the company file
         // open (e.g. a human in Multi-User Mode), the relay must ATTACH to that

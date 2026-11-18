@@ -1,0 +1,18 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+
+# Node / Vue
+node_modules/
+dist/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local settings with real keys
+appsettings.Development.json
+appsettings.Local.json

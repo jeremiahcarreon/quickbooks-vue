@@ -1,5 +1,5 @@
 using System.Runtime.InteropServices;
-using CcsQbRelay;
+using QuickBooksVueRelay;
 using Microsoft.Extensions.Hosting.WindowsServices;
 
 // Suppress Windows Error Reporting dialogs for any child processes spawned by this process.
@@ -13,7 +13,7 @@ var builder = Host.CreateApplicationBuilder(args);
 // Enable running as a Windows Service
 builder.Services.AddWindowsService(options =>
 {
-    options.ServiceName = "CCS QB Relay";
+    options.ServiceName = "QuickBooks Vue Relay";
 });
 
 // Register our services

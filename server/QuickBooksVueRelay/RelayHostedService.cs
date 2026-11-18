@@ -2,7 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 
-namespace CcsQbRelay;
+namespace QuickBooksVueRelay;
 
 /// <summary>
 /// Hosted service that runs the HTTP listener and dispatches requests to the QbWorker.
