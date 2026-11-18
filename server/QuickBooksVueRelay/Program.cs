@@ -6,7 +6,10 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 // SEM_FAILCRITICALERRORS (0x0001) - Don't display the critical-error-handler message box
 // SEM_NOGPFAULTERRORBOX  (0x0002) - Don't display the Windows Error Reporting dialog
 // SEM_NOOPENFILEERRORBOX (0x8000) - Don't display the file-not-found message box
-SetErrorMode(0x0001 | 0x0002 | 0x8000);
+if (OperatingSystem.IsWindows())
+{
+    SetErrorMode(0x0001 | 0x0002 | 0x8000);
+}
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -17,6 +20,11 @@ builder.Services.AddWindowsService(options =>
 });
 
 // Register our services
+builder.Services.AddSingleton(sp =>
+    RelayOptions.FromConfiguration(sp.GetRequiredService<IConfiguration>().GetSection("Relay"), AppContext.BaseDirectory));
+builder.Services.AddSingleton(sp =>
+    SchemaValidationService.Create(sp.GetRequiredService<RelayOptions>(), sp.GetRequiredService<ILogger<SchemaValidationService>>()));
+builder.Services.AddSingleton<RelayStats>();
 builder.Services.AddSingleton<QbWorker>();
 builder.Services.AddHostedService<RelayHostedService>();
 

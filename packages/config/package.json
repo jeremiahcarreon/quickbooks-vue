@@ -1,0 +1,37 @@
+{
+  "name": "@qbv/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Environment parsing (Zod) and logger factory (pino) shared by every service",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "pino": "9.14.0",
+    "pino-pretty": "13.2.0",
+    "zod": "3.25.76"
+  }
+}

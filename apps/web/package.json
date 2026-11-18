@@ -1,0 +1,34 @@
+{
+  "name": "@qbv/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QuickBooks Vue single-page app (Vue 3, Vite, Pinia, vue-router, PrimeVue)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@primeuix/themes": "2.0.3",
+    "pinia": "3.0.4",
+    "primeicons": "7.0.0",
+    "primevue": "4.5.5",
+    "vue": "3.5.44",
+    "vue-router": "4.6.4"
+  },
+  "devDependencies": {
+    "@qbv/qbxml": "^0.1.0",
+    "@vitejs/plugin-vue": "6.0.10",
+    "@vue/test-utils": "2.4.11",
+    "jsdom": "26.1.0",
+    "vite": "7.3.7",
+    "vue-tsc": "3.3.13"
+  }
+}

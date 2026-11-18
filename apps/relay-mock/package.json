@@ -1,0 +1,42 @@
+{
+  "name": "@qbv/relay-mock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "XSD-validating, stateful fake of the QuickBooks relay for development and tests",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "qbv-relay-mock": "./dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "start": "node dist/main.js",
+    "dev": "SEED=1 node --enable-source-maps dist/main.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@qbv/config": "*",
+    "@qbv/qbxml": "*",
+    "fast-xml-parser": "5.2.5",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@qbv/relay-client": "^0.1.0"
+  }
+}

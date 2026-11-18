@@ -1,0 +1,71 @@
+# QuickBooks Vue: production-shaped stack.
+#   docker compose up -d --build
+# Development (adds relay-mock and host ports): npm run dev:up
+# Every variable is documented in docs/configuration.md. Each app ships its
+# own fragment at apps/<app>/compose.yaml, pulled in below with include.
+name: qbv
+
+include:
+  - apps/api/compose.yaml
+  - apps/worker/compose.yaml
+  - apps/sync/compose.yaml
+  - apps/web/compose.yaml
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-qbv}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qbv}
+      POSTGRES_DB: ${POSTGRES_DB:-qbv}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # One-shot: apply migrations, create default roles and (if ADMIN_* are set) the first admin.
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+      args:
+        SERVICE: migrate
+    image: qbv/migrate:local
+    init: true
+    restart: 'no'
+    working_dir: /app
+    command:
+      [
+        'sh',
+        '-c',
+        'node packages/db/dist/cli/migrate.js latest && node packages/db/dist/cli/seed.js',
+      ]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-qbv}:${POSTGRES_PASSWORD:-qbv}@postgres:5432/${POSTGRES_DB:-qbv}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_NAME: ${ADMIN_NAME:-Administrator}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:

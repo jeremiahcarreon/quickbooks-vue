@@ -1,0 +1,36 @@
+# worker: the only process that talks to the relay (BullMQ concurrency 1,
+# queue global concurrency 1). Run exactly one replica.
+services:
+  worker:
+    build:
+      context: ../..
+      dockerfile: docker/node.Dockerfile
+      args:
+        SERVICE: worker
+    image: qbv/worker:local
+    init: true
+    restart: unless-stopped
+    # On stop the worker finishes the command in flight; a relay call can take
+    # up to RELAY_TIMEOUT_MS (130 s by default).
+    stop_grace_period: 150s
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-qbv}:${POSTGRES_PASSWORD:-qbv}@postgres:5432/${POSTGRES_DB:-qbv}
+      REDIS_URL: redis://redis:6379
+      QUEUE_PREFIX: ${QUEUE_PREFIX:-qbv}
+      RELAY_URL: ${RELAY_URL:-}
+      RELAY_API_KEY: ${RELAY_API_KEY:-}
+      RELAY_TIMEOUT_MS: ${RELAY_TIMEOUT_MS:-130000}
+      QBXML_VERSION: ${QBXML_VERSION:-16.0}
+      WORKER_MAX_ATTEMPTS: ${WORKER_MAX_ATTEMPTS:-5}
+      WORKER_BACKOFF: ${WORKER_BACKOFF:-2s}
+      RELAY_HEALTH_INTERVAL: ${RELAY_HEALTH_INTERVAL:-15s}
+      CIRCUIT_BREAKER_COOLDOWN: ${CIRCUIT_BREAKER_COOLDOWN:-30s}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully

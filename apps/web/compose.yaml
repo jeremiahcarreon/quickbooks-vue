@@ -1,0 +1,16 @@
+# web: nginx serving the SPA and proxying /api (SSE-safe) to the api service.
+# Put a TLS-terminating reverse proxy in front of WEB_PORT in production.
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: docker/web.Dockerfile
+    image: qbv/web:local
+    restart: unless-stopped
+    environment:
+      API_UPSTREAM: http://api:3100
+    ports:
+      - '${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8180}:80'
+    depends_on:
+      api:
+        condition: service_started

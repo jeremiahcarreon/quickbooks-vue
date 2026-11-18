@@ -1,0 +1,47 @@
+# relay-mock: XSD-validating, stateful fake of the Windows relay for development
+# and tests (never in production). Included only from compose.dev.yaml.
+# Container port 9223; host port QBV_RELAY_MOCK_PORT (default 9223), loopback only.
+services:
+  relay-mock:
+    build:
+      context: ../..
+      dockerfile: docker/node.Dockerfile
+      args:
+        SERVICE: relay-mock
+    image: qbv/relay-mock:local
+    init: true
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      RELAY_MOCK_HOST: 0.0.0.0
+      RELAY_MOCK_PORT: '9223'
+      RELAY_API_KEY: ${RELAY_API_KEY:-dev-relay-key}
+      # Load the sample HVAC company on an empty store.
+      SEED: ${RELAY_MOCK_SEED:-1}
+      MOCK_SEED_ANCHOR: ${RELAY_MOCK_SEED_ANCHOR:-2026-10-31}
+      # Simulated QuickBooks processing time per request.
+      MOCK_LATENCY_MS: ${RELAY_MOCK_LATENCY_MS:-0}
+      MOCK_LATENCY_JITTER_MS: ${RELAY_MOCK_LATENCY_JITTER_MS:-0}
+      # Kept on the relaymock volume so the fake company file survives restarts
+      # and rebuilds, like a real one (the read model in Postgres stays in step).
+      # Set RELAY_MOCK_DATA_FILE= (empty) for an in-memory company that is
+      # reseeded on every start; then resync with POST /api/admin/sync/* {"mode":"full"}.
+      MOCK_DATA_FILE: ${RELAY_MOCK_DATA_FILE-/app/data/relay-mock-company.json}
+    volumes:
+      - relaymock:/app/data
+    ports:
+      - '127.0.0.1:${QBV_RELAY_MOCK_PORT:-9223}:9223'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:9223/qb/health',{headers:{'x-api-key':process.env.RELAY_API_KEY||''}}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  relaymock:

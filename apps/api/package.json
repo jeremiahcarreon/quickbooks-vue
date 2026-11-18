@@ -1,0 +1,49 @@
+{
+  "name": "@qbv/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QuickBooks Vue HTTP API: REST, SSE, raw qbXML, auth, RBAC and audit",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "start": "node dist/main.js",
+    "dev": "node --watch dist/main.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.5",
+    "@fastify/cors": "11.3.1",
+    "@fastify/swagger": "9.9.2",
+    "@fastify/swagger-ui": "6.1.2",
+    "@qbv/config": "*",
+    "@qbv/db": "*",
+    "@qbv/qbxml": "*",
+    "@qbv/queue": "*",
+    "@qbv/relay-client": "*",
+    "@qbv/reports": "*",
+    "bullmq": "5.81.5",
+    "fastify": "5.12.7",
+    "ioredis": "5.11.1",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@qbv/sync": "*"
+  }
+}

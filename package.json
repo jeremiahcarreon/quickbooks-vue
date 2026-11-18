@@ -1,0 +1,44 @@
+{
+  "name": "quickbooks-vue",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "e2e"
+  ],
+  "scripts": {
+    "codegen": "npm run codegen -w @qbv/qbxml",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "migrate": "npm run migrate -w @qbv/db --",
+    "seed": "npm run seed -w @qbv/db",
+    "infra:up": "docker compose -p qbv-test -f compose.test.yaml up -d --wait",
+    "infra:down": "docker compose -p qbv-test -f compose.test.yaml down -v",
+    "infra:ps": "docker compose -p qbv-test -f compose.test.yaml ps",
+    "dev:up": "docker compose -p qbv -f compose.yaml -f compose.dev.yaml up -d --build",
+    "dev:down": "docker compose -p qbv -f compose.yaml -f compose.dev.yaml down",
+    "dev:logs": "docker compose -p qbv -f compose.yaml -f compose.dev.yaml logs -f",
+    "test:e2e": "npm run test:e2e -w @qbv/e2e"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/node": "22.20.4",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-vue": "10.12.1",
+    "globals": "16.5.0",
+    "prettier": "3.10.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.73.0",
+    "vitest": "3.2.4",
+    "vue-eslint-parser": "10.4.2"
+  }
+}

@@ -1,0 +1,16 @@
+# Keep the build context small. schemas/ is intentionally NOT ignored: the
+# image build runs qbXML codegen from the local XSDs.
+**/node_modules
+**/dist
+**/coverage
+**/.vite
+.git
+.github
+.vscode
+.idea
+server
+docs
+**/*.log
+**/.env
+**/.env.*
+packages/qbxml/generated

@@ -1,0 +1,38 @@
+{
+  "name": "@qbv/sync",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sync scheduler: initial load, incremental, deletions and reconcile of the QuickBooks read model through the relay queue",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "start": "node dist/main.js",
+    "dev": "node --watch dist/main.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@qbv/config": "*",
+    "@qbv/db": "*",
+    "@qbv/qbxml": "*",
+    "@qbv/queue": "*",
+    "bullmq": "5.81.5",
+    "ioredis": "5.11.1"
+  }
+}

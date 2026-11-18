@@ -17,14 +17,23 @@
 .PARAMETER Port
     HTTP port for the relay. Default: 9123
 
+.PARAMETER SchemaSource
+    Folder holding the Intuit qbXML XSDs (QBUqbxmlops170.xsd and the three files
+    it includes). They are copied to <InstallDir>\schemas so the relay can
+    validate requests (Relay:ValidateSchema). Default: ..\schemas\qbxml\17.0
+    relative to this script, when it exists. The XSDs are not distributed with
+    the relay; copy them from the QuickBooks SDK.
+
 .EXAMPLE
     .\deploy.ps1
     .\deploy.ps1 -InstallDir "D:\QuickBooksVueRelay" -Port 9200
+    .\deploy.ps1 -SchemaSource "D:\qbxml-xsd\17.0"
 #>
 
 param(
     [string]$InstallDir = "C:\Services\QuickBooksVueRelay",
-    [int]$Port = 9123
+    [int]$Port = 9123,
+    [string]$SchemaSource = ""
 )
 
 $ProjectDir = Join-Path $PSScriptRoot "QuickBooksVueRelay"
@@ -104,18 +113,44 @@ if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
-# Copy published files
-Copy-Item -Path "$publishDir\*" -Destination $InstallDir -Recurse -Force
+# Copy published files. appsettings*.json is excluded so an existing,
+# edited configuration is never overwritten by the template.
+Get-ChildItem -Path $publishDir -Force |
+    Where-Object { $_.Name -notlike "appsettings*.json" } |
+    Copy-Item -Destination $InstallDir -Recurse -Force
 
 # Copy appsettings.json if not already present (don't overwrite existing config)
 $targetSettings = Join-Path $InstallDir "appsettings.json"
 if (-not (Test-Path $targetSettings)) {
-    $sourceSettings = Join-Path $PSScriptRoot "appsettings.json"
+    $sourceSettings = Join-Path $publishDir "appsettings.json"
+    if (-not (Test-Path $sourceSettings)) {
+        $sourceSettings = Join-Path $ProjectDir "appsettings.json"
+    }
     Copy-Item -Path $sourceSettings -Destination $targetSettings
     Write-Host "  Copied default appsettings.json - EDIT THIS before starting the relay!"
     Write-Host "  Set QbFilePath, ApiKey, and AllowedIPs in: $targetSettings" -ForegroundColor Red
 } else {
     Write-Host "  appsettings.json already exists - preserved existing config."
+}
+
+# qbXML XSDs for request validation (not distributed; see README)
+if (-not $SchemaSource) {
+    $SchemaSource = Join-Path $PSScriptRoot "..\schemas\qbxml\17.0"
+}
+$schemaTarget = Join-Path $InstallDir "schemas"
+if (Test-Path (Join-Path $SchemaSource "QBUqbxmlops170.xsd")) {
+    if (-not (Test-Path $schemaTarget)) {
+        New-Item -ItemType Directory -Path $schemaTarget -Force | Out-Null
+    }
+    Copy-Item -Path (Join-Path $SchemaSource "*.xsd") -Destination $schemaTarget -Force
+    Write-Host "  Copied qbXML XSDs to $schemaTarget"
+} elseif (Test-Path (Join-Path $schemaTarget "QBUqbxmlops170.xsd")) {
+    Write-Host "  Using qbXML XSDs already in $schemaTarget"
+} else {
+    Write-Warning "  qbXML XSDs not found. The relay defaults to Relay:ValidateSchema=enforce and will"
+    Write-Warning "  refuse every request (500) until they are installed."
+    Write-Warning "  Copy QBUqbxmlops170.xsd, QBUqbxml170.xsd, QBUqbxmlso170.xsd and qbxmltypes170.xsd to $schemaTarget"
+    Write-Warning "  (or set ValidateSchema to log in appsettings.json as an explicit, temporary opt-out)."
 }
 
 Write-Host "  Files copied."
@@ -154,8 +189,19 @@ Write-Host "=== Deployment Complete ===" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Health check:" -ForegroundColor Yellow
 try {
-    $health = Invoke-RestMethod -Uri "http://localhost:$Port/qb/health" -TimeoutSec 5
+    $healthHeaders = @{}
+    try {
+        $cfg = Get-Content $targetSettings -Raw | ConvertFrom-Json
+        if ($cfg.Relay.ApiKey) { $healthHeaders["X-Api-Key"] = $cfg.Relay.ApiKey }
+    } catch { }
+    $health = Invoke-RestMethod -Uri "http://localhost:$Port/qb/health" -Headers $healthHeaders -TimeoutSec 5
     Write-Host "  Connected: $($health.connected)" -ForegroundColor $(if ($health.connected) { "Green" } else { "Yellow" })
+    if ($health.version) {
+        Write-Host "  Version: $($health.version)"
+    }
+    if ($health.validation) {
+        Write-Host "  XSD validation: $($health.validation.mode) (schema loaded: $($health.validation.schemaLoaded))"
+    }
     if ($health.lastError) {
         Write-Host "  Last Error: $($health.lastError)" -ForegroundColor Yellow
     }
@@ -172,8 +218,9 @@ Write-Host "  3. Open QuickBooks Desktop and approve the 'QuickBooks Vue Relay' 
 Write-Host "     (Edit > Preferences > Integrated Applications > Company Preferences)"
 Write-Host "     Check: 'Allow this application to log in automatically'"
 Write-Host "     Check: 'Allow access even if QuickBooks is not running'"
-Write-Host "  4. Close QuickBooks - the relay connects via DB Server Manager, QB doesn't need to be open"
-Write-Host "  5. Test: Invoke-RestMethod http://localhost:${Port}/qb/health"
+Write-Host "  4. With AttachToOpenFile=true (default) the relay attaches to the company file QuickBooks has open."
+Write-Host "     Set AttachToOpenFile=false only for unattended use where the relay opens QbFilePath itself."
+Write-Host "  5. Test: Invoke-RestMethod http://localhost:${Port}/qb/health -Headers @{ 'X-Api-Key' = '<ApiKey>' }"
 Write-Host ""
 Write-Host "AUTO-START:" -ForegroundColor Yellow
 Write-Host "  The relay starts automatically when this Windows user logs in."

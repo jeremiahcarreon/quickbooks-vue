@@ -1,0 +1,50 @@
+# Development overlay: relay mock instead of QuickBooks, host ports on 127.0.0.1.
+#   docker compose -p qbv -f compose.yaml -f compose.dev.yaml up -d --build   (npm run dev:up)
+# Ports: postgres 55434, redis 56380, api 3100, web 8180, relay-mock 9223.
+# (55432 and 56379 are taken on this machine by another Postgres and by the
+#  qbv-test stack; override with QBV_PG_PORT / QBV_REDIS_PORT.)
+include:
+  - apps/relay-mock/compose.yaml
+
+services:
+  # Development-only first admin (override with ADMIN_EMAIL / ADMIN_PASSWORD).
+  migrate:
+    environment:
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-dev-admin-password}
+
+  postgres:
+    ports:
+      - '127.0.0.1:${QBV_PG_PORT:-55434}:5432'
+
+  redis:
+    ports:
+      - '127.0.0.1:${QBV_REDIS_PORT:-56380}:6379'
+
+  api:
+    ports:
+      - '127.0.0.1:${QBV_API_PORT:-3100}:3100'
+    environment:
+      NODE_ENV: development
+      COOKIE_SECURE: 'false'
+      PUBLIC_URL: http://localhost:${QBV_WEB_PORT:-8180}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-0123456789}
+      RELAY_URL: http://relay-mock:9223
+      RELAY_API_KEY: ${RELAY_API_KEY:-dev-relay-key}
+
+  worker:
+    environment:
+      NODE_ENV: development
+      RELAY_URL: http://relay-mock:9223
+      RELAY_API_KEY: ${RELAY_API_KEY:-dev-relay-key}
+    depends_on:
+      relay-mock:
+        condition: service_started
+
+  sync:
+    environment:
+      NODE_ENV: development
+
+  web:
+    ports: !override
+      - '127.0.0.1:${QBV_WEB_PORT:-8180}:80'

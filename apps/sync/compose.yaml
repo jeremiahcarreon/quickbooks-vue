@@ -1,0 +1,40 @@
+# sync: schedules initial, incremental, deletion and reconcile queries.
+# All QuickBooks traffic goes through the relay queue (the worker sends it).
+# Several replicas are safe: a Redis leader lock lets only one run the schedule.
+services:
+  sync:
+    build:
+      context: ../..
+      dockerfile: docker/node.Dockerfile
+      args:
+        SERVICE: sync
+    image: qbv/sync:local
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-qbv}:${POSTGRES_PASSWORD:-qbv}@postgres:5432/${POSTGRES_DB:-qbv}
+      REDIS_URL: redis://redis:6379
+      QUEUE_PREFIX: ${QUEUE_PREFIX:-qbv}
+      QBXML_VERSION: ${QBXML_VERSION:-16.0}
+      SYNC_ENABLED: ${SYNC_ENABLED:-true}
+      SYNC_INTERVAL: ${SYNC_INTERVAL:-60s}
+      SYNC_FULL_INTERVAL: ${SYNC_FULL_INTERVAL:-1h}
+      SYNC_PAGE_SIZE: ${SYNC_PAGE_SIZE:-500}
+      SYNC_RECONCILE_CRON: ${SYNC_RECONCILE_CRON:-0 3 * * *}
+      SYNC_ENTITIES: ${SYNC_ENTITIES:-}
+      SYNC_OVERLAP: ${SYNC_OVERLAP:-1m}
+      SYNC_COMMAND_TIMEOUT: ${SYNC_COMMAND_TIMEOUT:-30m}
+      SYNC_PRUNE_RESPONSES: ${SYNC_PRUNE_RESPONSES:-true}
+      SYNC_INCLUDE_CUSTOM_FIELDS: ${SYNC_INCLUDE_CUSTOM_FIELDS:-true}
+      SYNC_LOCK_TTL: ${SYNC_LOCK_TTL:-30s}
+      TZ: ${TZ:-UTC}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully

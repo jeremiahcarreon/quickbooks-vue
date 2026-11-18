@@ -1,0 +1,10 @@
+# Intuit qbXML XSDs are licensed under the qbXML Developer Agreement and must
+# never be committed. They may be copied next to the relay for local use.
+QuickBooksVueRelay/schemas/
+**/QBUqbxml*.xsd
+**/qbxmltypes*.xsd
+
+# Build and test output
+bin/
+obj/
+TestResults/
