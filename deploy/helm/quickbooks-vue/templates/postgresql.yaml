@@ -1,0 +1,126 @@
+{{- if .Values.postgresql.enabled }}
+{{- $c := .Values.postgresql }}
+{{- $ctx := dict "root" . "component" "postgresql" }}
+{{- $name := include "qbv.postgresql.fullname" . }}
+{{- $password := include "qbv.postgresql.password" . }}
+# Development / CI only. Production uses a managed Postgres.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qbv.componentLabels" $ctx | nindent 4 }}
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: {{ $password | quote }}
+  DATABASE_URL: {{ printf "postgres://%s:%s@%s:5432/%s" $c.auth.username $password $name $c.auth.database | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qbv.componentLabels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "qbv.componentSelectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qbv.componentLabels" $ctx | nindent 4 }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qbv.componentSelectorLabels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with (include "qbv.scheduling" $c) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: postgresql
+          image: "{{ $c.image.repository }}:{{ $c.image.tag }}"
+          imagePullPolicy: {{ $c.image.pullPolicy }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: {{ $c.auth.username | quote }}
+            - name: POSTGRES_DB
+              value: {{ $c.auth.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $name }}
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+          securityContext:
+            {{- include "qbv.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- if not $c.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if $c.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "qbv.componentSelectorLabels" $ctx | nindent 10 }}
+      spec:
+        accessModes:
+          {{- toYaml $c.persistence.accessModes | nindent 10 }}
+        {{- with $c.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $c.persistence.size }}
+  {{- end }}
+{{- end }}

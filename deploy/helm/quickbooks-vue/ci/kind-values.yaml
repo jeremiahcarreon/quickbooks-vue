@@ -1,0 +1,88 @@
+# CI / kind smoke test (deploy/helm/ci/kind-smoke.sh): every dependency in
+# the cluster, the relay mock instead of QuickBooks, images loaded with
+# `kind load docker-image` (deploy/helm/ci/build-images.sh).
+fullnameOverride: qbv
+
+image:
+  prefix: qbv
+  tag: ci
+  pullPolicy: Never
+
+relayMock:
+  enabled: true
+  # NodePorts let kind-smoke.sh forward through Docker instead of
+  # `kubectl port-forward`, which drops its tunnel under browser traffic.
+  service:
+    type: NodePort
+    nodePort: 30923
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 768Mi }
+
+postgresql:
+  enabled: true
+  auth:
+    password: qbv-ci-password
+  persistence:
+    enabled: false
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { memory: 512Mi }
+  image:
+    pullPolicy: IfNotPresent
+
+redis:
+  enabled: true
+  persistence:
+    enabled: false
+  image:
+    pullPolicy: IfNotPresent
+
+secrets:
+  sessionSecret: dev-only-session-secret-change-me-0123456789
+  relayApiKey: dev-relay-key
+  adminEmail: admin@example.com
+  adminPassword: dev-admin-password
+
+config:
+  NODE_ENV: production
+  COOKIE_SECURE: 'false'
+  PUBLIC_URL: http://localhost:8180
+
+api:
+  replicaCount: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 768Mi }
+
+worker:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+sync:
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits: { memory: 512Mi }
+
+web:
+  replicaCount: 1
+  service:
+    type: NodePort
+    nodePort: 30080
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { memory: 128Mi }
+
+migrate:
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { memory: 384Mi }
+
+# kindnet (kind >= 0.24) enforces NetworkPolicy: exercise the policies too.
+networkPolicy:
+  enabled: true
+  # The smoke test and Playwright call the mock's control endpoints through
+  # its NodePort (source: the kind node).
+  relayMockAllowFrom:
+    - ipBlock: { cidr: 0.0.0.0/0 }

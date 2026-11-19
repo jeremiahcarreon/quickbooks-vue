@@ -1,0 +1,125 @@
+# Release: after CI passes on a push to master, build every image and push it
+# to each configured private cloud registry, tagged with the commit SHA.
+# Deploying is a separate, manual step (deploy.yml).
+#
+# A cloud is skipped until its repository variables are set (values come from
+# `terraform output` in deploy/terraform/<cloud>; see each README):
+#   AWS:   AWS_REGION, AWS_PUSH_ROLE_ARN, AWS_IMAGE_PREFIX
+#   GCP:   GCP_WIF_PROVIDER, GCP_PUSH_SA, GCP_IMAGE_PREFIX
+#   Azure: AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, AZURE_PUSH_CLIENT_ID, AZURE_ACR_NAME, AZURE_IMAGE_PREFIX
+#
+# Images contain Intuit-licensed XSDs: push them only to these private
+# registries, never to a public one (Docker Hub, public GHCR packages).
+name: Release images
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  gate:
+    name: CI passed on a master push
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'master')
+    steps:
+      - run: echo "Releasing $SHA"
+
+  aws:
+    name: Push to Amazon ECR
+    needs: gate
+    if: vars.AWS_PUSH_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SHA }}
+          persist-credentials: false
+      - uses: ./.github/actions/qbxml-schemas
+        with:
+          schemas: ${{ secrets.QBXML_SCHEMAS }}
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_PUSH_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783 # v2.2.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - run: .github/scripts/build-push.sh "${{ vars.AWS_IMAGE_PREFIX }}" "$SHA"
+
+  gcp:
+    name: Push to Artifact Registry
+    needs: gate
+    if: vars.GCP_PUSH_SA != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SHA }}
+          persist-credentials: false
+      - uses: ./.github/actions/qbxml-schemas
+        with:
+          schemas: ${{ secrets.QBXML_SCHEMAS }}
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_PUSH_SA }}
+          token_format: access_token
+      - name: Log in to Artifact Registry
+        env:
+          TOKEN: ${{ steps.auth.outputs.access_token }}
+          PREFIX: ${{ vars.GCP_IMAGE_PREFIX }}
+        run: printf '%s' "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://${PREFIX%%/*}"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - run: .github/scripts/build-push.sh "${{ vars.GCP_IMAGE_PREFIX }}" "$SHA"
+
+  azure:
+    name: Push to Azure Container Registry
+    needs: gate
+    if: vars.AZURE_PUSH_CLIENT_ID != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SHA }}
+          persist-credentials: false
+      - uses: ./.github/actions/qbxml-schemas
+        with:
+          schemas: ${{ secrets.QBXML_SCHEMAS }}
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_PUSH_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - run: az acr login --name "${{ vars.AZURE_ACR_NAME }}"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - run: .github/scripts/build-push.sh "${{ vars.AZURE_IMAGE_PREFIX }}" "$SHA"

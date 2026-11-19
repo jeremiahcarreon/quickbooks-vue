@@ -1,0 +1,12 @@
+{{- include "qbv.validate" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "qbv.fullname" . }}-config
+  labels:
+    {{- include "qbv.labels" . | nindent 4 }}
+data:
+  {{- range $k, $v := .Values.config }}
+  {{ $k }}: {{ toString $v | quote }}
+  {{- end }}
+  RELAY_URL: {{ include "qbv.relayUrl" . | quote }}

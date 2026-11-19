@@ -1,0 +1,191 @@
+# Deploy: manual. Installs or upgrades the Helm chart on the chosen cloud's
+# cluster with images that release.yml pushed for a commit.
+#
+# Runs in a GitHub environment (default `prod`): add required reviewers there
+# to gate deploys. The cloud's OIDC trust only accepts jobs in the
+# environments listed in Terraform's `github_environments`.
+#
+# Repository variables (from `terraform output`, see deploy/terraform/<cloud>/README.md):
+#   AWS:   AWS_REGION, AWS_DEPLOY_ROLE_ARN, AWS_IMAGE_PREFIX, AWS_CLUSTER_NAME, AWS_APP_SECRET_ID
+#   GCP:   GCP_PROJECT_ID, GCP_REGION, GCP_WIF_PROVIDER, GCP_DEPLOY_SA, GCP_IMAGE_PREFIX,
+#          GCP_CLUSTER_NAME, GCP_APP_SECRET_ID
+#   Azure: AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, AZURE_DEPLOY_CLIENT_ID, AZURE_IMAGE_PREFIX,
+#          AZURE_RESOURCE_GROUP, AZURE_CLUSTER_NAME, AZURE_KEY_VAULT, AZURE_APP_SECRET_NAME
+# Environment variables (per GitHub environment):
+#   RELAY_URL    relay address on the private network, e.g. http://100.101.102.103:9123 (required)
+#   PUBLIC_URL   external URL of the web app, e.g. https://qbv.example.com (required)
+#   HELM_VALUES  optional extra values.yaml content (ingress, resources, replicas, ...)
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      cloud:
+        description: Target cloud
+        type: choice
+        options: [aws, gcp, azure]
+        required: true
+      environment:
+        description: GitHub environment (and Kubernetes namespace suffix)
+        type: string
+        default: prod
+        required: true
+      tag:
+        description: Image tag (a master commit SHA released by release.yml; empty = this run's commit)
+        type: string
+        required: false
+
+concurrency:
+  group: deploy-${{ inputs.cloud }}-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.cloud }} / ${{ inputs.environment }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ vars.PUBLIC_URL }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CLOUD: ${{ inputs.cloud }}
+      TAG: ${{ inputs.tag || github.sha }}
+      NAMESPACE: qbv
+      RELEASE: qbv
+      CHART: deploy/helm/quickbooks-vue
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check settings
+        env:
+          RELAY_URL: ${{ vars.RELAY_URL }}
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+        run: |
+          [[ "$TAG" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::tag must be a commit SHA"; exit 1; }
+          [ -n "$RELAY_URL" ] || { echo "::error::Set the RELAY_URL variable on the '${{ inputs.environment }}' environment"; exit 1; }
+          [ -n "$PUBLIC_URL" ] || { echo "::error::Set the PUBLIC_URL variable on the '${{ inputs.environment }}' environment"; exit 1; }
+
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with:
+          version: v3.17.3
+      - uses: azure/setup-kubectl@bda439f5f36b99b262ebdcd3613869bddb064c8e # v5.2.0
+        with:
+          version: v1.32.2
+
+      # ---- AWS ------------------------------------------------------------
+      - if: inputs.cloud == 'aws'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - if: inputs.cloud == 'aws'
+        name: Cluster credentials and app secret (AWS)
+        env:
+          CLUSTER: ${{ vars.AWS_CLUSTER_NAME }}
+          REGION: ${{ vars.AWS_REGION }}
+          SECRET_ID: ${{ vars.AWS_APP_SECRET_ID }}
+          PREFIX: ${{ vars.AWS_IMAGE_PREFIX }}
+        run: |
+          aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION"
+          aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text > "$RUNNER_TEMP/app.json"
+          echo "IMAGE_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+
+      # ---- GCP ------------------------------------------------------------
+      - if: inputs.cloud == 'gcp'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - if: inputs.cloud == 'gcp'
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - if: inputs.cloud == 'gcp'
+        uses: google-github-actions/get-gke-credentials@3da1e46a907576cefaa90c484278bb5b259dd395 # v3.0.0
+        with:
+          cluster_name: ${{ vars.GCP_CLUSTER_NAME }}
+          location: ${{ vars.GCP_REGION }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          dns_based_endpoint: true
+      - if: inputs.cloud == 'gcp'
+        name: App secret (GCP)
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          SECRET_ID: ${{ vars.GCP_APP_SECRET_ID }}
+          PREFIX: ${{ vars.GCP_IMAGE_PREFIX }}
+        run: |
+          gcloud secrets versions access latest --secret="${SECRET_ID##*/}" --project="$PROJECT" > "$RUNNER_TEMP/app.json"
+          echo "IMAGE_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+
+      # ---- Azure ----------------------------------------------------------
+      - if: inputs.cloud == 'azure'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_DEPLOY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - if: inputs.cloud == 'azure'
+        uses: azure/use-kubelogin@0ce7c36141aa27d4934872cf00b0120804c98a29 # v1.3
+        with:
+          kubelogin-version: v0.2.10
+      - if: inputs.cloud == 'azure'
+        name: Cluster credentials and app secret (Azure)
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          CLUSTER: ${{ vars.AZURE_CLUSTER_NAME }}
+          VAULT: ${{ vars.AZURE_KEY_VAULT }}
+          SECRET_NAME: ${{ vars.AZURE_APP_SECRET_NAME }}
+          PREFIX: ${{ vars.AZURE_IMAGE_PREFIX }}
+        run: |
+          az aks get-credentials --resource-group "$RG" --name "$CLUSTER" --overwrite-existing
+          kubelogin convert-kubeconfig -l azurecli
+          az keyvault secret show --vault-name "$VAULT" --name "$SECRET_NAME" --query value --output tsv > "$RUNNER_TEMP/app.json"
+          echo "IMAGE_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+
+      # ---- Common ---------------------------------------------------------
+      - name: Create or update the app Secret
+        run: |
+          set -euo pipefail
+          umask 077
+          jq -r 'to_entries[] | select(.value != null and .value != "") | "\(.key)=\(.value)"' "$RUNNER_TEMP/app.json" > "$RUNNER_TEMP/app.env"
+          for k in DATABASE_URL REDIS_URL SESSION_SECRET RELAY_API_KEY; do
+            grep -q "^$k=" "$RUNNER_TEMP/app.env" || { echo "::error::app secret has no $k"; exit 1; }
+          done
+          kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n "$NAMESPACE" create secret generic qbv-env --from-env-file="$RUNNER_TEMP/app.env" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          rm -f "$RUNNER_TEMP/app.json" "$RUNNER_TEMP/app.env"
+
+      - name: Helm upgrade
+        env:
+          RELAY_URL: ${{ vars.RELAY_URL }}
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+          HELM_VALUES: ${{ vars.HELM_VALUES }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${HELM_VALUES:-{}}" > "$RUNNER_TEMP/values.yaml"
+          helm upgrade --install "$RELEASE" "$CHART" \
+            --namespace "$NAMESPACE" \
+            --values "$RUNNER_TEMP/values.yaml" \
+            --set image.prefix="$IMAGE_PREFIX" \
+            --set image.tag="$TAG" \
+            --set secrets.existingSecret=qbv-env \
+            --set relay.url="$RELAY_URL" \
+            --set config.PUBLIC_URL="$PUBLIC_URL" \
+            --set-string config.DATABASE_SSL=true \
+            --atomic --wait --timeout 15m
+          helm -n "$NAMESPACE" history "$RELEASE" --max 5
+
+      - name: Verify
+        run: |
+          set -euo pipefail
+          kubectl -n "$NAMESPACE" get deploy,pods -o wide
+          kubectl -n "$NAMESPACE" run "health-${GITHUB_RUN_ID}" --rm -i --restart=Never --quiet \
+            --image=curlimages/curl:8.11.1 \
+            --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":100,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"c","image":"curlimages/curl:8.11.1","args":["-fsS","http://'"$RELEASE"'-quickbooks-vue-web/api/health"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'

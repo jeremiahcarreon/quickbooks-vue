@@ -1,0 +1,70 @@
+{{- $c := .Values.worker }}
+{{- $ctx := dict "root" . "component" "worker" }}
+{{- $image := include "qbv.image" (dict "root" . "service" "worker" "values" $c) }}
+{{- $pull := include "qbv.pullPolicy" (dict "root" . "values" $c) }}
+# The only relay client: exactly one replica, never two at once (Recreate).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "qbv.componentName" $ctx }}
+  labels:
+    {{- include "qbv.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qbv.componentSelectorLabels" $ctx | nindent 8 }}
+        {{- with $c.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include "qbv.configChecksum" . }}
+        {{- with $c.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "qbv.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with (include "qbv.imagePullSecrets" .) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      securityContext:
+        {{- include "qbv.podSecurityContext" . | nindent 8 }}
+      terminationGracePeriodSeconds: {{ $c.terminationGracePeriodSeconds }}
+      {{- with (include "qbv.scheduling" $c) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      {{- with (include "qbv.waitForSchema" (dict "root" . "image" $image "pullPolicy" $pull)) }}
+      initContainers:
+        {{- . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ $image }}
+          imagePullPolicy: {{ $pull }}
+          command: ["node", "dist/main.js"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "qbv.fullname" . }}-config
+          env:
+            {{- include "qbv.secretEnv" (dict "root" . "keys" (list "DATABASE_URL" "REDIS_URL" "RELAY_API_KEY")) | trim | nindent 12 }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          securityContext:
+            {{- include "qbv.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

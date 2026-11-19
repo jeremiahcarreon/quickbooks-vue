@@ -1,0 +1,216 @@
+{{- define "qbv.np.peerSelector" -}}
+- podSelector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" . | nindent 6 }}
+{{- end -}}
+{{- define "qbv.np.dns" -}}
+- to:
+    {{- toYaml .Values.networkPolicy.dns.peers | nindent 4 }}
+  ports:
+    {{- toYaml .Values.networkPolicy.dns.ports | nindent 4 }}
+{{- end -}}
+{{- define "qbv.np.database" -}}
+{{- if .Values.postgresql.enabled }}
+- to:
+    {{- include "qbv.np.peerSelector" (dict "root" . "component" "postgresql") | nindent 4 }}
+  ports:
+    - { port: 5432, protocol: TCP }
+{{- else }}
+- {{- with .Values.networkPolicy.database.peers }}
+  to:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ports:
+    - { port: {{ .Values.networkPolicy.database.port }}, protocol: TCP }
+{{- end }}
+{{- end -}}
+{{- define "qbv.np.redis" -}}
+{{- if .Values.redis.enabled }}
+- to:
+    {{- include "qbv.np.peerSelector" (dict "root" . "component" "redis") | nindent 4 }}
+  ports:
+    - { port: 6379, protocol: TCP }
+{{- else }}
+- {{- with .Values.networkPolicy.redis.peers }}
+  to:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ports:
+    - { port: {{ .Values.networkPolicy.redis.port }}, protocol: TCP }
+{{- end }}
+{{- end -}}
+{{- define "qbv.np.relay" -}}
+{{- if and .Values.relayMock.enabled (not .Values.relay.url) }}
+- to:
+    {{- include "qbv.np.peerSelector" (dict "root" . "component" "relay-mock") | nindent 4 }}
+  ports:
+    - { port: 9223, protocol: TCP }
+{{- else }}
+- {{- with .Values.networkPolicy.relay.peers }}
+  to:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ports:
+    - { port: {{ .Values.networkPolicy.relay.port }}, protocol: TCP }
+{{- end }}
+{{- end -}}
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $root := . }}
+{{- /* web: ingress from webAllowFrom (any by default); egress to api and DNS. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "qbv.componentName" (dict "root" . "component" "web") }}
+  labels:
+    {{- include "qbv.componentLabels" (dict "root" . "component" "web") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" (dict "root" . "component" "web") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - {{- with $np.webAllowFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      ports:
+        - { port: 80, protocol: TCP }
+  egress:
+    - to:
+        {{- include "qbv.np.peerSelector" (dict "root" . "component" "api") | nindent 8 }}
+      ports:
+        - { port: 3100, protocol: TCP }
+    {{- include "qbv.np.dns" . | trim | nindent 4 }}
+---
+{{- /* api: ingress from web only; egress to Postgres, Redis, relay, DNS. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "qbv.componentName" (dict "root" . "component" "api") }}
+  labels:
+    {{- include "qbv.componentLabels" (dict "root" . "component" "api") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" (dict "root" . "component" "api") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- include "qbv.np.peerSelector" (dict "root" . "component" "web") | nindent 8 }}
+      ports:
+        - { port: 3100, protocol: TCP }
+  egress:
+    {{- include "qbv.np.database" . | trim | nindent 4 }}
+    {{- include "qbv.np.redis" . | trim | nindent 4 }}
+    {{- include "qbv.np.relay" . | trim | nindent 4 }}
+    {{- include "qbv.np.dns" . | trim | nindent 4 }}
+---
+{{- /* worker: no ingress; egress to Postgres, Redis, relay, DNS. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "qbv.componentName" (dict "root" . "component" "worker") }}
+  labels:
+    {{- include "qbv.componentLabels" (dict "root" . "component" "worker") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" (dict "root" . "component" "worker") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    {{- include "qbv.np.database" . | trim | nindent 4 }}
+    {{- include "qbv.np.redis" . | trim | nindent 4 }}
+    {{- include "qbv.np.relay" . | trim | nindent 4 }}
+    {{- include "qbv.np.dns" . | trim | nindent 4 }}
+{{- range $component := list "sync" "migrate" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "qbv.componentName" (dict "root" $root "component" $component) }}
+  labels:
+    {{- include "qbv.componentLabels" (dict "root" $root "component" $component) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" (dict "root" $root "component" $component) | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    {{- include "qbv.np.database" $root | trim | nindent 4 }}
+    {{- if eq $component "sync" }}
+    {{- include "qbv.np.redis" $root | trim | nindent 4 }}
+    {{- end }}
+    {{- include "qbv.np.dns" $root | trim | nindent 4 }}
+{{- end }}
+{{- if .Values.postgresql.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "qbv.postgresql.fullname" . }}
+  labels:
+    {{- include "qbv.componentLabels" (dict "root" . "component" "postgresql") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" (dict "root" . "component" "postgresql") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- range list "api" "worker" "sync" "migrate" }}
+        {{- include "qbv.np.peerSelector" (dict "root" $root "component" .) | nindent 8 }}
+        {{- end }}
+      ports:
+        - { port: 5432, protocol: TCP }
+{{- end }}
+{{- if .Values.redis.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "qbv.redis.fullname" . }}
+  labels:
+    {{- include "qbv.componentLabels" (dict "root" . "component" "redis") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" (dict "root" . "component" "redis") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- range list "api" "worker" "sync" }}
+        {{- include "qbv.np.peerSelector" (dict "root" $root "component" .) | nindent 8 }}
+        {{- end }}
+      ports:
+        - { port: 6379, protocol: TCP }
+{{- end }}
+{{- if .Values.relayMock.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "qbv.componentName" (dict "root" . "component" "relay-mock") }}
+  labels:
+    {{- include "qbv.componentLabels" (dict "root" . "component" "relay-mock") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" (dict "root" . "component" "relay-mock") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- range list "api" "worker" }}
+        {{- include "qbv.np.peerSelector" (dict "root" $root "component" .) | nindent 8 }}
+        {{- end }}
+      ports:
+        - { port: 9223, protocol: TCP }
+    {{- with $np.relayMockAllowFrom }}
+    # Test tooling (e.g. the Playwright suite's control calls via a NodePort).
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - { port: 9223, protocol: TCP }
+    {{- end }}
+{{- end }}
+{{- end }}

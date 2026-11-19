@@ -1,0 +1,302 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "quickbooks-vue values",
+  "type": "object",
+  "definitions": {
+    "imageOverride": {
+      "type": "object",
+      "properties": {
+        "repository": { "type": "string" },
+        "tag": { "type": ["string", "number"] },
+        "pullPolicy": { "type": "string", "enum": ["", "Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": { "type": "object" },
+        "limits": { "type": "object" }
+      }
+    },
+    "pdb": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "maxUnavailable": { "type": ["integer", "string"] }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "size": { "type": "string" },
+        "storageClass": { "type": "string" },
+        "accessModes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "envList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": { "name": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "peers": { "type": "array", "items": { "type": "object" } }
+  },
+  "properties": {
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "image": {
+      "type": "object",
+      "required": ["pullPolicy"],
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "description": "Registry path in front of every image name, e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/qbv"
+        },
+        "tag": { "type": ["string", "number"] },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          { "type": "string" },
+          { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } }
+        ]
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "type": "object" }
+      }
+    },
+    "relay": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^(|https?://.+)$",
+          "description": "RELAY_URL of the Windows relay over the private network"
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "number", "boolean"] },
+      "properties": {
+        "NODE_ENV": { "type": "string", "enum": ["development", "production", "test"] },
+        "LOG_LEVEL": {
+          "type": "string",
+          "enum": ["fatal", "error", "warn", "info", "debug", "trace", "silent"]
+        },
+        "QBXML_VERSION": { "type": "string", "pattern": "^\\d+\\.\\d+$" },
+        "PUBLIC_URL": { "type": "string", "pattern": "^https?://.+" },
+        "COOKIE_SECURE": { "type": "string", "enum": ["true", "false"] },
+        "TRUST_PROXY": { "type": "string", "enum": ["true", "false"] },
+        "DATABASE_SSL": { "type": "string", "enum": ["true", "false"] },
+        "SYNC_ENABLED": { "type": "string", "enum": ["true", "false"] }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "databaseUrl": { "type": "string", "pattern": "^(|postgres(ql)?://.+)$" },
+        "redisUrl": { "type": "string", "pattern": "^(|rediss?://.+)$" },
+        "sessionSecret": { "type": "string" },
+        "relayApiKey": { "type": "string" },
+        "adminEmail": { "type": "string" },
+        "adminPassword": { "type": "string" }
+      }
+    },
+    "api": {
+      "type": "object",
+      "properties": {
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+            "port": { "type": "integer" },
+            "nodePort": { "type": ["integer", "null"], "minimum": 30000, "maximum": 32767 }
+          }
+        },
+        "replicaCount": { "type": "integer", "minimum": 1 },
+        "image": { "$ref": "#/definitions/imageOverride" },
+        "resources": { "$ref": "#/definitions/resources" },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+        "autoscaling": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "minReplicas": { "type": "integer", "minimum": 1 },
+            "maxReplicas": { "type": "integer", "minimum": 1 },
+            "targetCPUUtilizationPercentage": { "type": "integer", "minimum": 1 },
+            "targetMemoryUtilizationPercentage": { "type": ["integer", "null"] }
+          }
+        },
+        "pdb": { "$ref": "#/definitions/pdb" },
+        "extraEnv": { "$ref": "#/definitions/envList" }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "not": { "required": ["replicaCount"] },
+      "properties": {
+        "image": { "$ref": "#/definitions/imageOverride" },
+        "resources": { "$ref": "#/definitions/resources" },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+        "extraEnv": { "$ref": "#/definitions/envList" }
+      }
+    },
+    "sync": {
+      "type": "object",
+      "properties": {
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "image": { "$ref": "#/definitions/imageOverride" },
+        "resources": { "$ref": "#/definitions/resources" },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+        "pdb": { "$ref": "#/definitions/pdb" },
+        "extraEnv": { "$ref": "#/definitions/envList" }
+      }
+    },
+    "web": {
+      "type": "object",
+      "properties": {
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+            "port": { "type": "integer" },
+            "nodePort": { "type": ["integer", "null"], "minimum": 30000, "maximum": 32767 }
+          }
+        },
+        "replicaCount": { "type": "integer", "minimum": 1 },
+        "image": { "$ref": "#/definitions/imageOverride" },
+        "resources": { "$ref": "#/definitions/resources" },
+        "unprivilegedPortSysctl": { "type": "boolean" },
+        "pdb": { "$ref": "#/definitions/pdb" },
+        "extraEnv": { "$ref": "#/definitions/envList" }
+      }
+    },
+    "migrate": {
+      "type": "object",
+      "properties": {
+        "mode": { "type": "string", "enum": ["auto", "hook", "job"] },
+        "image": { "$ref": "#/definitions/imageOverride" },
+        "adminName": { "type": "string" },
+        "backoffLimit": { "type": "integer", "minimum": 0 },
+        "activeDeadlineSeconds": { "type": "integer", "minimum": 1 },
+        "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 },
+        "resources": { "$ref": "#/definitions/resources" }
+      }
+    },
+    "relayMock": {
+      "type": "object",
+      "properties": {
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+            "port": { "type": "integer" },
+            "nodePort": { "type": ["integer", "null"], "minimum": 30000, "maximum": 32767 }
+          }
+        },
+        "enabled": { "type": "boolean" },
+        "image": { "$ref": "#/definitions/imageOverride" },
+        "seed": { "type": "string" },
+        "seedAnchor": { "type": "string" },
+        "dataFile": { "type": "string" },
+        "extraEnv": { "$ref": "#/definitions/envList" }
+      }
+    },
+    "postgresql": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "auth": {
+          "type": "object",
+          "properties": {
+            "username": { "type": "string", "minLength": 1 },
+            "database": { "type": "string", "minLength": 1 },
+            "password": { "type": "string", "pattern": "^[A-Za-z0-9._~-]*$" }
+          }
+        },
+        "persistence": { "$ref": "#/definitions/persistence" }
+      }
+    },
+    "redis": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "persistence": { "$ref": "#/definitions/persistence" }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "annotations": { "type": "object" },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "host": { "type": "string" },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": { "type": "string" },
+                    "pathType": {
+                      "type": "string",
+                      "enum": ["Prefix", "Exact", "ImplementationSpecific"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tls": { "type": "array" }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "webAllowFrom": { "$ref": "#/definitions/peers" },
+        "relayMockAllowFrom": { "$ref": "#/definitions/peers" },
+        "database": {
+          "type": "object",
+          "properties": {
+            "peers": { "$ref": "#/definitions/peers" },
+            "port": { "type": "integer" }
+          }
+        },
+        "redis": {
+          "type": "object",
+          "properties": {
+            "peers": { "$ref": "#/definitions/peers" },
+            "port": { "type": "integer" }
+          }
+        },
+        "relay": {
+          "type": "object",
+          "properties": {
+            "peers": { "$ref": "#/definitions/peers" },
+            "port": { "type": "integer" }
+          }
+        }
+      }
+    }
+  }
+}
