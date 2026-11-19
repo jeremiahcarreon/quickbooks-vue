@@ -3,6 +3,8 @@
 A modern web front end and an open integration API for QuickBooks Desktop
 Enterprise.
 
+![QuickBooks Vue home dashboard: open invoices, overdue balance, unpaid bills, QuickBooks link status, aging and recent transactions](docs/screenshots/home.png)
+
 - **Web app** (Vue 3): lists, transactions, Customer and Vendor Centers, a home
   dashboard, reports and a raw qbXML console. Forms are generated from the
   qbXML schema, so every entity the SDK exposes has list, detail, add and edit
@@ -20,6 +22,30 @@ or open a modal dialog that blocks everything, so invalid XML is rejected
 early: on build, before it is queued, in the worker before it is sent, and
 optionally in the Windows relay itself. The raw qbXML endpoint answers 400 with
 the libxml2 error and line number.
+
+## Screenshots
+
+All screenshots use the sample company that ships with `relay-mock`, so they
+match what the [quick start](#quick-start-no-quickbooks-needed) gives you.
+
+|                                                                       |                                                                                             |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| ![Invoice list](docs/screenshots/invoices.png)                        | ![Invoice detail](docs/screenshots/invoice-detail.png)                                      |
+| **Invoices** from the Postgres read model, sortable and searchable.   | **Invoice detail** with every qbXML field, edit sequence and line items.                    |
+| ![Customer Center](docs/screenshots/customer-center.png)              | ![Profit and loss report](docs/screenshots/profit-loss.png)                                 |
+| **Customer Center**: balance, contact details and transactions.       | **Profit & Loss**, fetched from QuickBooks through the queue and cached.                    |
+| ![Sync status](docs/screenshots/sync.png)                             | ![qbXML console with validation errors](docs/screenshots/qbxml.png)                         |
+| **Sync status** per object type: rows, last run, last full sync.      | **qbXML console**: invalid XML is rejected with the XSD error and line before it is queued. |
+| ![Command history](docs/screenshots/commands.png)                     | ![API reference](docs/screenshots/api.png)                                                  |
+| **Command history**: every request sent to QuickBooks and its status. | **API reference** (OpenAPI) for other applications.                                         |
+
+On a phone the app keeps the same screens with a slide-out menu:
+
+<p>
+  <img src="docs/screenshots/mobile-home.png" width="240" alt="Home on a phone">
+  <img src="docs/screenshots/mobile-menu.png" width="240" alt="Navigation menu on a phone">
+  <img src="docs/screenshots/mobile-invoice-detail.png" width="240" alt="Invoice detail on a phone">
+</p>
 
 ## Architecture
 
