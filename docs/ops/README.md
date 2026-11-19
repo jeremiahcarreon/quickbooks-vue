@@ -11,6 +11,10 @@ How to run QuickBooks Vue in production.
 | [upgrade.md](upgrade.md)                       | Upgrading the stack, the relay and QuickBooks itself                                                                         |
 | [troubleshooting.md](troubleshooting.md)       | QuickBooks modal dialogs, multi-user mode, 3200 conflicts, sync gaps, relay connectivity                                     |
 
+## Kubernetes
+
+Cloud setup (Terraform for AWS, GCP and Azure) and the CI/CD pipelines are in [cloud.md](cloud.md). To run the stack on Kubernetes (EKS, GKE, AKS) instead of a Docker host, use the Helm chart in [`deploy/helm/quickbooks-vue`](../../deploy/helm/quickbooks-vue/README.md). It runs web, api, worker, sync and the migrate Job against managed Postgres and Redis; the relay stays on the Windows host, reached over the private network (the chart README covers the Tailscale Kubernetes operator). `deploy/helm/ci/` holds the kind smoke test that CI runs.
+
 Related reference:
 
 - [../configuration.md](../configuration.md): every environment variable of the Docker services

@@ -1,0 +1,38 @@
+# Copy to terraform.tfvars (git-ignored) and adjust.
+project_id  = "my-qbv-project"
+region      = "us-central1"
+name        = "qbv"
+environment = "prod"
+
+github_repository   = "jeremiahcarreon/quickbooks-vue"
+github_environments = ["prod"]
+
+# Prefer passing this via TF_VAR_relay_api_key instead of writing it to disk.
+# relay_api_key = ""
+
+# GKE: Autopilot (default). Set false for Standard + autoscaling node pool.
+enable_autopilot = true
+release_channel  = "REGULAR"
+# kubernetes_version = "1.33"
+# master_authorized_networks = [
+#   { cidr_block = "203.0.113.10/32", display_name = "office" },
+# ]
+enable_dns_endpoint = true
+
+# Standard mode only (per zone; a regional pool spans 3 zones):
+# node_machine_type = "e2-standard-2"
+# node_min_count    = 1
+# node_max_count    = 2
+
+db_tier              = "db-custom-1-3840"
+db_disk_size_gb      = 20
+db_high_availability = false
+
+redis_tier           = "STANDARD_HA"
+redis_memory_size_gb = 1
+
+deletion_protection = true
+
+labels = {
+  owner = "ops"
+}

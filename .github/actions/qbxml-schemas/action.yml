@@ -1,0 +1,30 @@
+name: qbXML schemas
+description: >
+  Restores the Intuit qbXML 17.0 XSDs into schemas/qbxml/17.0 from the
+  QBXML_SCHEMAS repository secret (base64 of a tar.xz holding the 17.0
+  folder). The XSDs are Intuit-licensed: they are never committed, never
+  uploaded as artifacts and never cached.
+
+inputs:
+  schemas:
+    description: Value of secrets.QBXML_SCHEMAS.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore XSDs
+      shell: bash
+      env:
+        QBXML_SCHEMAS: ${{ inputs.schemas }}
+      run: |
+        set -euo pipefail
+        if [ -z "${QBXML_SCHEMAS}" ]; then
+          echo "::error title=QBXML_SCHEMAS secret missing::Create it with: tar cf - -C schemas/qbxml 17.0 | xz -9e | base64 -w0 | gh secret set QBXML_SCHEMAS"
+          exit 1
+        fi
+        mkdir -p schemas/qbxml
+        printf '%s' "${QBXML_SCHEMAS}" | base64 -d | tar xJf - -C schemas/qbxml
+        test -f schemas/qbxml/17.0/QBUqbxmlops170.xsd
+        echo "QBXML_SCHEMA_DIR=${GITHUB_WORKSPACE}/schemas/qbxml/17.0" >> "${GITHUB_ENV}"
+        ls -l schemas/qbxml/17.0

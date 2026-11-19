@@ -1,0 +1,47 @@
+# Copy to terraform.tfvars (git-ignored) and adjust.
+# Pass the relay key through the environment instead of this file:
+#   export TF_VAR_relay_api_key='...'
+
+name        = "qbv"
+environment = "prod"
+region      = "us-east-1"
+
+github_repository   = "jeremiahcarreon/quickbooks-vue"
+github_environments = ["prod"]
+
+# Set to false if the account already has the GitHub OIDC provider.
+create_github_oidc_provider = true
+
+kubernetes_version = "1.36"
+
+# Lock the public EKS API down when you know your ranges, or set
+# cluster_endpoint_public_access = false and deploy from inside the VPC.
+cluster_endpoint_public_access       = true
+cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
+
+# Extra humans/roles who should get cluster-admin (the Terraform identity
+# always does).
+# cluster_admin_principal_arns = ["arn:aws:iam::123456789012:role/Admin"]
+
+az_count           = 2
+single_nat_gateway = true
+
+node_instance_types = ["t3.medium"]
+node_min_size       = 2
+node_desired_size   = 2
+node_max_size       = 4
+
+db_instance_class        = "db.t4g.small"
+db_allocated_storage_gb  = 20
+db_multi_az              = false
+db_backup_retention_days = 7
+
+redis_node_type          = "cache.t4g.small"
+redis_num_cache_clusters = 1
+
+# Keep true in production. Set false and apply before `terraform destroy`.
+deletion_protection = true
+
+tags = {
+  Owner = "ops"
+}

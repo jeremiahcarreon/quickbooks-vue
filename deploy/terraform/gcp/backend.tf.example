@@ -1,0 +1,16 @@
+# Copy to backend.tf and set the bucket. Create the bucket once, outside this
+# module (versioning on, uniform access, public access prevention enforced):
+#
+#   gcloud storage buckets create gs://<bucket> --project <project> \
+#     --location <region> --uniform-bucket-level-access \
+#     --public-access-prevention
+#   gcloud storage buckets update gs://<bucket> --versioning
+#
+# State contains secrets (DB password, Redis AUTH, session secret): keep the
+# bucket private and restrict who can read it.
+terraform {
+  backend "gcs" {
+    bucket = "my-qbv-tfstate"
+    prefix = "quickbooks-vue/gcp/prod"
+  }
+}

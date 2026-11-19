@@ -70,6 +70,7 @@ The full design, contracts and decisions are in [docs/DESIGN.md](docs/DESIGN.md)
 | [`packages/config`](packages/config)             | Environment parsing and logging                                                                    |
 | [`packages/reports`](packages/reports)           | SQL and QuickBooks reports                                                                         |
 | [`server/`](server/)                             | The Windows relay: a .NET 8 service with an HTTP API in front of the QuickBooks SDK                |
+| [`deploy/`](deploy)                              | Terraform for AWS, GCP and Azure, and the Helm chart                                               |
 | [`e2e/`](e2e)                                    | Playwright end-to-end tests against the dev stack                                                  |
 | [`docs/`](docs)                                  | [Design](docs/DESIGN.md), [configuration](docs/configuration.md), [operations](docs/ops/README.md) |
 
@@ -131,6 +132,8 @@ is published, behind a TLS reverse proxy.
 - Install the relay on the QuickBooks machine: [server/README.md](server/README.md).
 - Deploy, network, TLS, backups, upgrades and troubleshooting:
   [docs/ops](docs/ops/README.md).
+- Kubernetes on AWS, GCP or Azure (Terraform + Helm) and the CI/CD pipelines:
+  [docs/ops/cloud.md](docs/ops/cloud.md).
 
 ## Development
 

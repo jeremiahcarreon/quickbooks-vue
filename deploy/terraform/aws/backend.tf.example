@@ -1,0 +1,30 @@
+# Remote state. Copy to backend.tf and fill in, then `terraform init`.
+#
+# The state contains the database password, Redis AUTH token and session
+# secret, so the bucket must be private, versioned and encrypted, and only
+# the operators who run Terraform should be able to read it.
+#
+# Create the bucket once (outside this module):
+#   aws s3api create-bucket --bucket <bucket> --region <region> \
+#     --create-bucket-configuration LocationConstraint=<region>   # omit for us-east-1
+#   aws s3api put-bucket-versioning --bucket <bucket> --versioning-configuration Status=Enabled
+#   aws s3api put-public-access-block --bucket <bucket> --public-access-block-configuration \
+#     BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+#   aws s3api put-bucket-encryption --bucket <bucket> --server-side-encryption-configuration \
+#     '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"aws:kms"},"BucketKeyEnabled":true}]}'
+
+terraform {
+  backend "s3" {
+    bucket  = "CHANGE-ME-tfstate"
+    key     = "quickbooks-vue/prod/aws.tfstate"
+    region  = "us-east-1"
+    encrypt = true
+
+    # S3-native locking (Terraform >= 1.10). No DynamoDB table needed.
+    use_lockfile = true
+
+    # On Terraform 1.6 - 1.9 use a DynamoDB lock table instead
+    # (partition key "LockID", type String):
+    # dynamodb_table = "CHANGE-ME-tflock"
+  }
+}

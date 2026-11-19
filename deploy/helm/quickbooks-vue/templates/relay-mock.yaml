@@ -1,0 +1,112 @@
+{{- if .Values.relayMock.enabled }}
+{{- $c := .Values.relayMock }}
+{{- $ctx := dict "root" . "component" "relay-mock" }}
+# Development / CI only: XSD-validating fake of the Windows relay.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "qbv.componentName" $ctx }}
+  labels:
+    {{- include "qbv.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qbv.componentSelectorLabels" $ctx | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "qbv.configChecksum" . }}
+        {{- with $c.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "qbv.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with (include "qbv.imagePullSecrets" .) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      securityContext:
+        {{- include "qbv.podSecurityContext" . | nindent 8 }}
+      {{- with (include "qbv.scheduling" $c) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: relay-mock
+          image: {{ include "qbv.image" (dict "root" . "service" "relay-mock" "values" $c) }}
+          imagePullPolicy: {{ include "qbv.pullPolicy" (dict "root" . "values" $c) }}
+          command: ["node", "dist/main.js"]
+          ports:
+            - name: http
+              containerPort: 9223
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: development
+            - name: LOG_LEVEL
+              value: {{ .Values.config.LOG_LEVEL | default "info" | quote }}
+            - name: QBXML_VERSION
+              value: {{ .Values.config.QBXML_VERSION | default "16.0" | quote }}
+            - name: RELAY_MOCK_HOST
+              value: "0.0.0.0"
+            - name: RELAY_MOCK_PORT
+              value: "9223"
+            - name: SEED
+              value: {{ $c.seed | quote }}
+            - name: MOCK_SEED_ANCHOR
+              value: {{ $c.seedAnchor | quote }}
+            - name: MOCK_DATA_FILE
+              value: {{ $c.dataFile | quote }}
+            - name: MOCK_LATENCY_MS
+              value: {{ $c.latencyMs | quote }}
+            - name: MOCK_LATENCY_JITTER_MS
+              value: {{ $c.latencyJitterMs | quote }}
+            {{- include "qbv.secretEnv" (dict "root" . "keys" (list "RELAY_API_KEY")) | trim | nindent 12 }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            {{- include "qbv.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "qbv.componentName" $ctx }}
+  labels:
+    {{- include "qbv.componentLabels" $ctx | nindent 4 }}
+spec:
+  type: {{ $c.service.type | default "ClusterIP" }}
+  selector:
+    {{- include "qbv.componentSelectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $c.service.port }}
+      targetPort: http
+      protocol: TCP
+      {{- if and (has $c.service.type (list "NodePort" "LoadBalancer")) $c.service.nodePort }}
+      nodePort: {{ $c.service.nodePort }}
+      {{- end }}
+{{- end }}

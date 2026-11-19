@@ -1,0 +1,51 @@
+# Copy to terraform.tfvars (git-ignored) and adjust.
+
+name        = "qbv"
+environment = "prod"
+location    = "eastus2"
+# subscription_id = "00000000-0000-0000-0000-000000000000"
+
+github_repository   = "jeremiahcarreon/quickbooks-vue"
+github_push_branch  = "master"
+github_environments = ["prod"]
+
+# Prefer TF_VAR_relay_api_key in the environment over writing it here.
+# relay_api_key = ""
+
+# AKS
+# kubernetes_version            = "1.33"
+aks_sku_tier                    = "Standard"
+api_server_authorized_ip_ranges = [] # e.g. ["203.0.113.10/32"]; empty = any address (Entra ID auth still required)
+node_vm_size                    = "Standard_D2ds_v5"
+node_count                      = 2
+node_autoscaling                = true
+node_min_count                  = 2
+node_max_count                  = 4
+availability_zones              = ["1", "2", "3"]
+
+# PostgreSQL Flexible Server 16
+postgres_sku_name              = "GP_Standard_D2ds_v5" # B_Standard_B2s is cheaper but has no HA
+postgres_storage_mb            = 32768
+postgres_backup_retention_days = 14
+postgres_high_availability     = false
+postgres_geo_redundant_backup  = false
+
+# Redis: "managed" (Azure Managed Redis) or "cache" (Azure Cache for Redis, retiring)
+redis_service           = "managed"
+redis_managed_sku_name  = "Balanced_B1"
+redis_high_availability = true
+redis_persistence       = "none"
+# redis_cache_sku       = "Standard"   # when redis_service = "cache"
+# redis_cache_capacity  = 1
+
+# Registry
+acr_sku              = "Standard" # Premium: private endpoint, retention, IP rules
+acr_purge_enabled    = true
+acr_purge_keep       = 15
+acr_purge_older_than = "30d"
+
+deletion_protection = true
+
+tags = {
+  owner = "ops"
+}

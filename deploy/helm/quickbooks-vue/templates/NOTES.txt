@@ -1,0 +1,36 @@
+QuickBooks Vue {{ .Chart.AppVersion }} is deployed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+{{- $web := include "qbv.componentName" (dict "root" . "component" "web") }}
+
+Migrations: {{ include "qbv.migrateMode" . }} mode
+{{- if eq (include "qbv.migrateMode" .) "hook" }} (ran as a pre-install/pre-upgrade hook)
+{{- else }} (Job {{ include "qbv.componentName" (dict "root" . "component" "migrate") }}-{{ .Release.Revision }}; api, worker and sync wait for the schema)
+{{- end }}
+Relay:      {{ include "qbv.relayUrl" . }}
+{{- if and .Values.relayMock.enabled (not .Values.relay.url) }} (in-cluster relay mock: development / CI only)
+{{- end }}
+Secrets:    {{ include "qbv.secretName" . }}{{ if .Values.secrets.existingSecret }} (existing){{ else }} (created by the chart){{ end }}
+
+Open the app:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}/
+{{- end }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $web }} 8180:{{ .Values.web.service.port }}
+  then http://localhost:8180  (PUBLIC_URL is {{ .Values.config.PUBLIC_URL }})
+{{- end }}
+
+Check health:
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ $web }} -- wget -qO- http://127.0.0.1/api/health
+{{- if and (eq .Values.config.COOKIE_SECURE "true") (not .Values.ingress.tls) }}
+
+Note: COOKIE_SECURE is "true", so login needs HTTPS in front of the web Service
+(ingress.tls or a TLS load balancer). Plain-HTTP testing needs COOKIE_SECURE=false.
+{{- end }}
+{{- if not .Values.secrets.existingSecret }}
+{{- if not .Values.secrets.adminEmail }}
+
+No first admin was configured (secrets.adminEmail / secrets.adminPassword).
+{{- end }}
+{{- end }}

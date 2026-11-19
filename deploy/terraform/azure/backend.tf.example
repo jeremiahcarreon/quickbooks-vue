@@ -1,0 +1,23 @@
+# Remote state in Azure Storage. Copy to backend.tf, fill in, then:
+#   terraform init -migrate-state
+#
+# Create the storage once, outside this module (state must not live in the
+# resource group this module manages):
+#   az group create -n rg-tfstate -l eastus2
+#   az storage account create -n <uniquename> -g rg-tfstate -l eastus2 \
+#     --sku Standard_ZRS --min-tls-version TLS1_2 --allow-blob-public-access false
+#   az storage container create -n tfstate --account-name <uniquename> --auth-mode login
+#   # the identity running terraform needs Storage Blob Data Contributor on it
+#
+# State contains secrets (database password, Redis key, session secret):
+# restrict who can read the storage account.
+
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "rg-tfstate"
+    storage_account_name = "CHANGE_ME"
+    container_name       = "tfstate"
+    key                  = "qbv/prod/azure.tfstate"
+    use_azuread_auth     = true
+  }
+}

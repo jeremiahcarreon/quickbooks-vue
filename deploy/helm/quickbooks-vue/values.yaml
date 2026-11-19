@@ -1,0 +1,424 @@
+# Default values for quickbooks-vue.
+#
+# The chart runs web (nginx + SPA), api, worker, sync and the migrate Job.
+# The relay that talks to QuickBooks runs on a Windows host outside the
+# cluster and is reached over a private network (Tailscale / WireGuard),
+# see README.md "Reaching the relay". Every variable is documented in
+# docs/configuration.md.
+
+# -- Override the chart name used in object names.
+nameOverride: ''
+# -- Override the full object name prefix (default: <release>-quickbooks-vue,
+# or <release> when the release name already contains the chart name).
+fullnameOverride: ''
+# -- Extra labels added to every object.
+commonLabels: {}
+
+image:
+  # -- Registry and path in front of every image name. REQUIRED.
+  # The image of service S is <prefix>/<S>:<tag>, S in api, worker, sync,
+  # web, migrate, relay-mock. Examples:
+  #   AWS ECR:   123456789012.dkr.ecr.us-east-1.amazonaws.com/qbv
+  #   GCP AR:    us-central1-docker.pkg.dev/my-project/qbv
+  #   Azure ACR: myregistry.azurecr.io/qbv
+  # The node images contain the Intuit qbXML XSDs: use a PRIVATE registry.
+  prefix: ''
+  # -- Tag of every image (default: the chart appVersion).
+  tag: ''
+  # -- Pull policy of every image (a service's image.pullPolicy overrides it).
+  pullPolicy: IfNotPresent
+
+# -- Pull secrets for the private registry: a list of names or {name: ...}.
+imagePullSecrets: []
+
+serviceAccount:
+  # -- Create a ServiceAccount for the app pods.
+  create: true
+  # -- Name (default: the full name). With create=false, an existing account.
+  name: ''
+  # -- Annotations, e.g. eks.amazonaws.com/role-arn or
+  # iam.gke.io/gcp-service-account for workload identity.
+  annotations: {}
+
+# -- Pod security context of the app pods (the node images run as user
+# node, uid 1000). Postgres, Redis and web set their own uid below.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container security context of every container. A writable /tmp
+# (emptyDir) is mounted wherever the root filesystem is read-only.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: ['ALL']
+
+relay:
+  # -- RELAY_URL of the Windows relay, e.g. http://100.101.102.103:9123 (a
+  # Tailscale IP) or http://<tailscale-egress-service>.<ns>.svc:9123.
+  # Required unless relayMock.enabled (then it defaults to the mock).
+  url: ''
+
+# -- Non-secret environment shared by api, worker and sync (one ConfigMap;
+# each service ignores the keys it does not use). Values are strings.
+# Defaults mirror compose.yaml. Pods roll when this changes.
+config:
+  NODE_ENV: production
+  LOG_LEVEL: info
+  TZ: UTC
+  QUEUE_PREFIX: qbv
+  QBXML_VERSION: '16.0'
+  # Postgres: TLS to managed databases (certificate not verified). "true" for
+  # RDS / Cloud SQL / Azure PG when they require SSL.
+  DATABASE_SSL: 'false'
+  DATABASE_POOL_MAX: '10'
+  # api
+  # External URL of the web app (cookies, CORS, links), e.g. https://qbv.example.com
+  PUBLIC_URL: http://localhost:8180
+  SESSION_TTL: 12h
+  # "false" only for plain-HTTP development.
+  COOKIE_SECURE: 'true'
+  # The api is always behind the web nginx (and usually an ingress).
+  TRUST_PROXY: 'true'
+  CORS_ORIGINS: ''
+  RATE_LIMIT_WRITES_PER_MIN: '120'
+  RATE_LIMIT_QBXML_PER_MIN: '60'
+  COMMAND_WAIT_TIMEOUT: 30s
+  REPORT_CACHE_TTL: 15m
+  # worker
+  RELAY_TIMEOUT_MS: '130000'
+  WORKER_MAX_ATTEMPTS: '5'
+  WORKER_BACKOFF: 2s
+  RELAY_HEALTH_INTERVAL: 15s
+  CIRCUIT_BREAKER_COOLDOWN: 30s
+  # sync
+  SYNC_ENABLED: 'true'
+  SYNC_INTERVAL: 60s
+  SYNC_FULL_INTERVAL: 1h
+  SYNC_PAGE_SIZE: '500'
+  SYNC_RECONCILE_CRON: '0 3 * * *'
+  SYNC_ENTITIES: ''
+  SYNC_OVERLAP: 1m
+  SYNC_COMMAND_TIMEOUT: 30m
+  SYNC_PRUNE_RESPONSES: 'true'
+  SYNC_INCLUDE_CUSTOM_FIELDS: 'true'
+  SYNC_LOCK_TTL: 30s
+
+secrets:
+  # -- Name of an existing Secret with keys DATABASE_URL, REDIS_URL,
+  # SESSION_SECRET, RELAY_API_KEY and optionally ADMIN_EMAIL, ADMIN_PASSWORD.
+  # Recommended for production (create it from your cloud secret manager,
+  # e.g. External Secrets Operator or the deploy pipeline). When set, the
+  # values below are ignored and no Secret is created by the chart.
+  existingSecret: ''
+  # -- DATABASE_URL, e.g. postgres://qbv:pw@mydb.xxxx.rds.amazonaws.com:5432/qbv
+  # (ignored when postgresql.enabled).
+  databaseUrl: ''
+  # -- REDIS_URL, e.g. rediss://:token@master.xxxx.cache.amazonaws.com:6379/0
+  # (ignored when redis.enabled).
+  redisUrl: ''
+  # -- SESSION_SECRET, at least 32 characters. Empty: generated once and kept
+  # across upgrades (read back from the cluster).
+  sessionSecret: ''
+  # -- RELAY_API_KEY; must match the relay's ApiKey (or the relay mock's).
+  relayApiKey: ''
+  # -- First admin, created by the migrate Job if it does not exist yet.
+  # Never changes an existing user. Password: at least 12 characters.
+  adminEmail: ''
+  adminPassword: ''
+
+api:
+  # -- Ignored when autoscaling.enabled.
+  replicaCount: 2
+  image:
+    # -- Full repository instead of <image.prefix>/api.
+    repository: ''
+    # -- Tag instead of image.tag.
+    tag: ''
+    pullPolicy: ''
+  service:
+    type: ClusterIP
+    port: 3100
+    # -- With type NodePort / LoadBalancer; empty = assigned by Kubernetes.
+    nodePort: null
+    annotations: {}
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+  # Readiness uses GET /api/health (503 while Postgres or Redis is down, so
+  # traffic stops). Relay outages never fail it. Liveness is a TCP check, so a
+  # database or relay outage does not restart the api.
+  readinessProbe:
+    httpGet: { path: /api/health, port: http }
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  livenessProbe:
+    tcpSocket: { port: http }
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    tcpSocket: { port: http }
+    periodSeconds: 3
+    failureThreshold: 40
+  terminationGracePeriodSeconds: 30
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 75
+    # -- Optional; empty = CPU only.
+    targetMemoryUtilizationPercentage: null
+  pdb:
+    enabled: true
+    maxUnavailable: 1
+  # -- Extra env ({name, value} / valueFrom) for this service.
+  extraEnv: []
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ''
+
+worker:
+  # The only relay client. Always exactly one replica, Recreate strategy: two
+  # workers must never run at once.
+  image: { repository: '', tag: '', pullPolicy: '' }
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 512Mi }
+  # -- Finishes the command in flight on stop; a relay call can take up to
+  # RELAY_TIMEOUT_MS (130s).
+  terminationGracePeriodSeconds: 150
+  extraEnv: []
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ''
+
+sync:
+  # -- Several replicas are safe (Redis leader lock); one runs the schedule.
+  replicaCount: 1
+  image: { repository: '', tag: '', pullPolicy: '' }
+  resources:
+    requests: { cpu: 50m, memory: 160Mi }
+    limits: { memory: 512Mi }
+  terminationGracePeriodSeconds: 30
+  pdb:
+    # -- Created only when replicaCount > 1.
+    enabled: true
+    maxUnavailable: 1
+  extraEnv: []
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ''
+
+web:
+  replicaCount: 2
+  image: { repository: '', tag: '', pullPolicy: '' }
+  service:
+    type: ClusterIP
+    port: 80
+    # -- With type NodePort / LoadBalancer; empty = assigned by Kubernetes.
+    nodePort: null
+    annotations: {}
+  # nginx runs as uid 101 with a read-only root; it renders its config from
+  # templates into an emptyDir at /etc/nginx/conf.d.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Adds the safe sysctl net.ipv4.ip_unprivileged_port_start=0 so the
+  # non-root nginx can bind port 80. Disable only if your runtime already sets
+  # it and your policy rejects pod sysctls.
+  unprivilegedPortSysctl: true
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 128Mi }
+  readinessProbe:
+    httpGet: { path: /healthz, port: http }
+    periodSeconds: 10
+  livenessProbe:
+    httpGet: { path: /healthz, port: http }
+    periodSeconds: 20
+  terminationGracePeriodSeconds: 30
+  pdb:
+    enabled: true
+    maxUnavailable: 1
+  extraEnv: []
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ''
+
+migrate:
+  # -- auto: a Helm pre-install/pre-upgrade hook with an external database,
+  # an ordinary Job (apps wait for the schema in an init container) with the
+  # in-chart Postgres. Or force hook / job.
+  mode: auto
+  image: { repository: '', tag: '', pullPolicy: '' }
+  # -- ADMIN_NAME of the first admin.
+  adminName: Administrator
+  backoffLimit: 3
+  activeDeadlineSeconds: 900
+  # -- Job mode only: remove finished Jobs after this many seconds.
+  ttlSecondsAfterFinished: 86400
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Development / CI only: the XSD-validating fake relay (never in production).
+relayMock:
+  enabled: false
+  image: { repository: '', tag: '', pullPolicy: '' }
+  service:
+    type: ClusterIP
+    port: 9223
+    nodePort: null
+  # -- SEED: load the sample HVAC company on an empty store.
+  seed: '1'
+  # -- MOCK_SEED_ANCHOR: last day of the seeded year, or "today".
+  seedAnchor: '2026-10-31'
+  # -- MOCK_DATA_FILE. Empty: in-memory company, reseeded on every start.
+  # A path under /app/data keeps it on an emptyDir for the pod's lifetime.
+  dataFile: ''
+  latencyMs: '0'
+  latencyJitterMs: '0'
+  extraEnv: []
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { memory: 768Mi }
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Development / CI only: a single Postgres. Production uses a managed service
+# (RDS, Cloud SQL, Azure Database for PostgreSQL) via secrets.databaseUrl or
+# existingSecret.
+postgresql:
+  enabled: false
+  image:
+    repository: postgres
+    tag: 16-alpine
+    pullPolicy: IfNotPresent
+  auth:
+    username: qbv
+    database: qbv
+    # -- Empty: generated once and kept across upgrades.
+    password: ''
+  persistence:
+    # -- false: emptyDir (data lost with the pod).
+    enabled: true
+    size: 8Gi
+    storageClass: ''
+    accessModes: ['ReadWriteOnce']
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Development / CI only: a single Redis (noeviction, required by BullMQ).
+# Production uses ElastiCache, Memorystore or Azure Cache for Redis with
+# maxmemory-policy noeviction.
+redis:
+  enabled: false
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+  persistence:
+    # -- false: emptyDir.
+    enabled: true
+    size: 1Gi
+    storageClass: ''
+    accessModes: ['ReadWriteOnce']
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 256Mi }
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Routes to the web Service only (nginx proxies /api, SSE-safe). With
+# ingress-nginx keep SSE working with:
+#   nginx.ingress.kubernetes.io/proxy-buffering: "off"
+#   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+#   nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+#   nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+ingress:
+  enabled: false
+  className: ''
+  annotations: {}
+  hosts:
+    - host: qbv.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- e.g. [{secretName: qbv-tls, hosts: [qbv.example.com]}]
+  tls: []
+
+# NetworkPolicies (default off). When on: only web accepts ingress (from
+# web.allowFrom, default any), only web reaches api, api/worker/sync/migrate
+# reach Postgres and Redis, worker and api reach the relay. DNS is allowed.
+networkPolicy:
+  enabled: false
+  # -- Peers allowed to reach web (e.g. the ingress controller namespace).
+  # Empty: any source.
+  webAllowFrom: []
+  # -- Extra peers allowed to reach the relay mock besides api and worker
+  # (development / CI test tooling).
+  relayMockAllowFrom: []
+  # -- Egress peers of the external Postgres (ignored with postgresql.enabled),
+  # e.g. [{ipBlock: {cidr: 10.0.0.0/16}}].
+  database:
+    peers: []
+    port: 5432
+  # -- Egress peers of the external Redis (ignored with redis.enabled).
+  redis:
+    peers: []
+    port: 6379
+  # -- Egress peers of the relay (ignored with relayMock and empty relay.url),
+  # e.g. [{ipBlock: {cidr: 100.64.0.0/10}}] or a podSelector of a Tailscale
+  # egress proxy.
+  relay:
+    peers: []
+    port: 9123
+  # -- Peers / ports of cluster DNS.
+  dns:
+    peers:
+      - namespaceSelector: {}
+        podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+    ports:
+      - { port: 53, protocol: UDP }
+      - { port: 53, protocol: TCP }

@@ -1,0 +1,94 @@
+{{- $c := .Values.migrate }}
+{{- $ctx := dict "root" . "component" "migrate" }}
+{{- $mode := include "qbv.migrateMode" . }}
+{{- $secret := include "qbv.migrateSecretName" . }}
+# Applies migrations, then creates the default roles and (with ADMIN_EMAIL /
+# ADMIN_PASSWORD) the first admin; same command as the compose migrate service.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  {{- if eq $mode "hook" }}
+  name: {{ include "qbv.componentName" $ctx }}
+  {{- else }}
+  name: {{ printf "%s-%d" (include "qbv.componentName" $ctx) (int .Release.Revision) | trunc 63 | trimSuffix "-" }}
+  {{- end }}
+  labels:
+    {{- include "qbv.componentLabels" $ctx | nindent 4 }}
+  {{- if eq $mode "hook" }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+  {{- end }}
+spec:
+  backoffLimit: {{ $c.backoffLimit }}
+  activeDeadlineSeconds: {{ $c.activeDeadlineSeconds }}
+  {{- if eq $mode "job" }}
+  ttlSecondsAfterFinished: {{ $c.ttlSecondsAfterFinished }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "qbv.componentSelectorLabels" $ctx | nindent 8 }}
+      {{- with $c.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: Never
+      {{- if eq $mode "job" }}
+      serviceAccountName: {{ include "qbv.serviceAccountName" . }}
+      {{- end }}
+      {{- /* Hook pods run before the chart's ServiceAccount exists: use the namespace default. */}}
+      automountServiceAccountToken: false
+      {{- with (include "qbv.imagePullSecrets" .) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      securityContext:
+        {{- include "qbv.podSecurityContext" . | nindent 8 }}
+      {{- with (include "qbv.scheduling" $c) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      {{- if .Values.postgresql.enabled }}
+      initContainers:
+        - name: wait-for-postgresql
+          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - until pg_isready -h {{ include "qbv.postgresql.fullname" . }} -p 5432 -U {{ .Values.postgresql.auth.username }}; do sleep 2; done
+          securityContext:
+            {{- include "qbv.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "qbv.image" (dict "root" . "service" "migrate" "values" $c) }}
+          imagePullPolicy: {{ include "qbv.pullPolicy" (dict "root" . "values" $c) }}
+          workingDir: /app
+          command:
+            - sh
+            - -c
+            - node packages/db/dist/cli/migrate.js latest && node packages/db/dist/cli/seed.js
+          env:
+            - name: NODE_ENV
+              value: {{ .Values.config.NODE_ENV | default "production" | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.LOG_LEVEL | default "info" | quote }}
+            - name: DATABASE_SSL
+              value: {{ .Values.config.DATABASE_SSL | default "false" | quote }}
+            - name: ADMIN_NAME
+              value: {{ $c.adminName | quote }}
+            {{- include "qbv.secretEnv" (dict "root" . "secretName" $secret "keys" (list "DATABASE_URL" "ADMIN_EMAIL" "ADMIN_PASSWORD")) | trim | nindent 12 }}
+          securityContext:
+            {{- include "qbv.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,315 @@
+# Continuous integration: every pull request to master and every push
+# (merge) to master runs the whole suite. `CI passed` is the single check to
+# require in branch protection.
+#
+# Jobs that build or test the app need the Intuit qbXML XSDs, restored from the
+# QBXML_SCHEMAS secret (see .github/actions/qbxml-schemas). Pull requests from
+# forks get no secrets, so those jobs are skipped there and run after merge.
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  FORCE_COLOR: '1'
+
+jobs:
+  gate:
+    name: Schemas available
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      schemas: ${{ steps.check.outputs.schemas }}
+    steps:
+      - id: check
+        env:
+          HAS_SCHEMAS: ${{ secrets.QBXML_SCHEMAS != '' }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          echo "schemas=${HAS_SCHEMAS}" >> "$GITHUB_OUTPUT"
+          if [ "$HAS_SCHEMAS" != "true" ]; then
+            if [ "$EVENT" = "pull_request" ]; then
+              echo "::notice::QBXML_SCHEMAS is not available (fork PR); app jobs are skipped and run after merge."
+            else
+              echo "::error::QBXML_SCHEMAS secret is not set; see .github/actions/qbxml-schemas/action.yml"
+              exit 1
+            fi
+          fi
+
+  lint:
+    name: Format, lint, typecheck
+    needs: gate
+    if: needs.gate.outputs.schemas == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/qbxml-schemas
+        with:
+          schemas: ${{ secrets.QBXML_SCHEMAS }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run build
+      - run: npm run lint
+      - run: npm run typecheck
+
+  test:
+    name: Unit and integration tests
+    needs: gate
+    if: needs.gate.outputs.schemas == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/qbxml-schemas
+        with:
+          schemas: ${{ secrets.QBXML_SCHEMAS }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Start Postgres and Redis (compose.test.yaml)
+        run: npm run infra:up
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - name: Stop Postgres and Redis
+        if: always()
+        run: npm run infra:down
+
+  relay:
+    name: Relay (.NET) tests
+    needs: gate
+    if: needs.gate.outputs.schemas == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/qbxml-schemas
+        with:
+          schemas: ${{ secrets.QBXML_SCHEMAS }}
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '8.0.x'
+      - name: Test relay core (XSD validation, HTTP, health)
+        run: dotnet test server/QuickBooksVueRelay.Tests --configuration Release --logger "console;verbosity=normal"
+
+  e2e:
+    name: End-to-end (Docker Compose)
+    needs: gate
+    if: needs.gate.outputs.schemas == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/qbxml-schemas
+        with:
+          schemas: ${{ secrets.QBXML_SCHEMAS }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Start the dev stack (relay mock seeded)
+        run: npm run dev:up
+      - name: Wait for the web app and the relay mock
+        run: |
+          for i in $(seq 1 120); do
+            if curl -fsS http://localhost:8180/api/health > /dev/null &&
+               curl -fsS -H 'x-api-key: dev-relay-key' http://127.0.0.1:9223/qb/health > /dev/null; then
+              echo "stack healthy after $((i * 5))s"; exit 0
+            fi
+            sleep 5
+          done
+          docker compose -p qbv -f compose.yaml -f compose.dev.yaml ps
+          exit 1
+      - run: npm ci
+      - run: npm run build -w @qbv/qbxml
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - run: npm run test:e2e
+      - name: Stack logs
+        if: failure()
+        run: docker compose -p qbv -f compose.yaml -f compose.dev.yaml logs --no-color --timestamps > e2e-compose.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: e2e-compose
+          retention-days: 7
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+            e2e-compose.log
+      - name: Stop the dev stack
+        if: always()
+        run: docker compose -p qbv -f compose.yaml -f compose.dev.yaml down -v
+
+  helm:
+    name: Helm chart lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CHART: deploy/helm/quickbooks-vue
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with:
+          version: v3.17.3
+      - name: Install kubeconform
+        run: |
+          curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+      - name: Lint (kind values)
+        run: helm lint --strict "$CHART" -f "$CHART/ci/kind-values.yaml"
+      - name: Render and validate (kind values)
+        run: |
+          helm template qbv "$CHART" -f "$CHART/ci/kind-values.yaml" |
+            kubeconform -strict -summary -kubernetes-version 1.30.0
+      - name: Render and validate (production shape)
+        run: |
+          helm template qbv "$CHART" \
+            --set image.prefix=registry.example.com/qbv --set image.tag=0123abc \
+            --set secrets.existingSecret=qbv-env \
+            --set relay.url=http://100.64.0.10:9123 \
+            --set ingress.enabled=true --set ingress.className=nginx \
+            --set 'ingress.hosts[0].host=qbv.example.com' \
+            --set api.autoscaling.enabled=true --set networkPolicy.enabled=true |
+            kubeconform -strict -summary -kubernetes-version 1.30.0
+      - name: Smoke script lint
+        run: shellcheck deploy/helm/ci/*.sh .github/scripts/*.sh
+
+  kubernetes:
+    name: End-to-end (kind + Helm)
+    needs: gate
+    if: needs.gate.outputs.schemas == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/qbxml-schemas
+        with:
+          schemas: ${{ secrets.QBXML_SCHEMAS }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with:
+          version: v3.17.3
+      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
+        with:
+          cluster_name: qbv
+          version: v0.27.0
+          node_image: kindest/node:v1.32.2
+      - name: Build images and load them into kind
+        run: deploy/helm/ci/build-images.sh qbv
+      - name: Install the chart and smoke test it
+        run: deploy/helm/ci/kind-smoke.sh --keep-forwarding
+      - run: npm ci
+      - run: npm run build -w @qbv/qbxml
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - name: Playwright against the cluster
+        run: npm run test:e2e
+      - name: Cluster state
+        if: failure()
+        run: |
+          kubectl -n qbv get all,events -o wide > k8s-state.log 2>&1 || true
+          for p in $(kubectl -n qbv get pods -o name); do
+            echo "=== $p" >> k8s-state.log
+            kubectl -n qbv logs "$p" --all-containers --tail=500 >> k8s-state.log 2>&1 || true
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: e2e-kubernetes
+          retention-days: 7
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+            k8s-state.log
+      - name: Stop forwarding
+        if: always()
+        run: deploy/helm/ci/kind-smoke.sh --stop-forwarding || true
+
+  terraform:
+    name: Terraform (${{ matrix.cloud }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        cloud: [aws, gcp, azure]
+    defaults:
+      run:
+        working-directory: deploy/terraform/${{ matrix.cloud }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive -diff
+      - run: terraform init -backend=false -input=false -lockfile=readonly
+      - run: terraform validate
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+      - run: tflint --init && tflint --format compact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  actionlint:
+    name: Workflow lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color
+
+  ci-ok:
+    name: CI passed
+    if: always()
+    needs: [gate, lint, test, relay, e2e, helm, kubernetes, terraform, actionlint]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          # skipped is fine (fork PRs without the schema secret); anything else must succeed
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' > /dev/null

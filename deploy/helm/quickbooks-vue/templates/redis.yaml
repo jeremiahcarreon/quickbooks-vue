@@ -1,0 +1,99 @@
+{{- if .Values.redis.enabled }}
+{{- $c := .Values.redis }}
+{{- $ctx := dict "root" . "component" "redis" }}
+{{- $name := include "qbv.redis.fullname" . }}
+# Development / CI only. Production uses a managed Redis with noeviction.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qbv.componentLabels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "qbv.componentSelectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qbv.componentLabels" $ctx | nindent 4 }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "qbv.componentSelectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qbv.componentSelectorLabels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with (include "qbv.scheduling" $c) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: redis
+          image: "{{ $c.image.repository }}:{{ $c.image.tag }}"
+          imagePullPolicy: {{ $c.image.pullPolicy }}
+          command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction", "--dir", "/data"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+          securityContext:
+            {{- include "qbv.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if not $c.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if $c.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "qbv.componentSelectorLabels" $ctx | nindent 10 }}
+      spec:
+        accessModes:
+          {{- toYaml $c.persistence.accessModes | nindent 10 }}
+        {{- with $c.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $c.persistence.size }}
+  {{- end }}
+{{- end }}
